@@ -1,0 +1,31 @@
+# Environment variables (never commit real secrets/keys)
+.env
+backend/.env
+frontend/.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments
+venv/
+env/
+.venv/
+backend/venv/
+frontend/venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit (frontend, once it exists)
+.streamlit/secrets.toml
+
+# Docker
+docker-compose.override.yml
