@@ -195,19 +195,28 @@ def set_article_content(article_id: str, content: str, status: str) -> None:
 
 
 def expire_old_content(cutoff: datetime) -> int:
-    """Purges content and marks as 'Expired' any article published before
-    `cutoff` that still has content stored (from a successful extraction or
-    a manual paste). Runs as step 0 of the Scrape button's workflow, every
-    time it's clicked — there is no separate scheduler for this. Articles
-    that never had content (still 'No Extraction'/'Failed') are untouched
-    here; they only become 'Expired' if explicitly selected for scraping
-    while already past the cutoff. Returns how many articles were affected.
+    """Purges content and marks as 'Expired' every article published before
+    `cutoff`, regardless of its current ingestion status (so a stale
+    'No Extraction'/'Failed' article is excluded from future extraction
+    attempts, not just previously-'Successful' ones). Runs as step 1 of the
+    Extract Articles workflow, every time it's clicked — there is no
+    separate scheduler for this. Already-'Expired' articles are left alone
+    (nothing to change). Returns how many articles were affected.
     """
     result = articles.update_many(
         {
             "published_at": {"$lt": cutoff},
-            "content": {"$ne": None},
+            "ingestion_status": {"$ne": "Expired"},
         },
         {"$set": {"content": None, "ingestion_status": "Expired"}},
     )
     return result.modified_count
+
+
+def get_articles_pending_extraction() -> List[ArticleOut]:
+    """Returns every article still in its initial 'No Extraction' state —
+    the candidate pool for the Extract Articles workflow. Called after
+    expire_old_content(), so anything past the cutoff has already been
+    flipped to 'Expired' and won't show up here."""
+    cursor = articles.find({"ingestion_status": "No Extraction"})
+    return [ArticleOut(**_serialize_article(doc)) for doc in cursor]

@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import database
-from app.routers import articles, stats, update
+from app.routers import articles, extraction, stats, update
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ app = FastAPI(
 app.include_router(update.router)
 app.include_router(articles.router)
 app.include_router(stats.router)
+app.include_router(extraction.router)
 
 
 @app.get("/health")
