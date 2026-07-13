@@ -56,10 +56,35 @@ def render():
         published = article.get("published_at", "")
         keywords = ", ".join(article.get("matched_keywords", [])) or "—"
         source = article.get("source_name") or "Unknown source"
+        ingestion_status = article.get("ingestion_status", "No Extraction")
 
         st.markdown(
             f"**[{article['title']}]({article['url']})**  \n"
-            f"{lang_tag} · {published} · {source}  \n"
+            f"{lang_tag} · {published} · {source} · Extraction: {ingestion_status}  \n"
             f"Keywords: {keywords}"
         )
+
+        if ingestion_status == "Failed":
+            _render_manual_content_form(article)
+
         st.divider()
+
+
+def _render_manual_content_form(article: dict):
+    """Lets the user paste an article's content by hand when automatic
+    extraction failed — saved via PUT /articles/{id}/content, which stores
+    it exactly as a successful extraction would."""
+    article_id = article["id"]
+    with st.expander("Paste content manually"):
+        pasted = st.text_area("Article content", key=f"manual_content_{article_id}")
+        if st.button("Save", key=f"manual_content_save_{article_id}"):
+            if not pasted.strip():
+                st.warning("Paste some content first.")
+            else:
+                try:
+                    api_client.submit_manual_content(article_id, pasted)
+                except Exception as e:
+                    st.error(f"Could not save content: {e}")
+                else:
+                    st.success("Content saved.")
+                    st.rerun()

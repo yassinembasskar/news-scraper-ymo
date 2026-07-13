@@ -1,7 +1,8 @@
 """
 Overview bar: today/month totals + top keywords, last scrape time, and the
-manual "Update" button. Calls GET /stats/overview and POST /update via
-api_client — no direct HTTP calls here.
+manual "Update" and "Extract articles" buttons. Calls GET /stats/overview,
+POST /update, and POST /articles/extract via api_client — no direct HTTP
+calls here.
 """
 
 import streamlit as st
@@ -12,10 +13,13 @@ import api_client
 def render():
     st.subheader("Overview")
 
-    # If an update just ran (see button handler below), show its result
-    # once, then clear it — otherwise it would reappear on every rerun.
+    # If an update/extraction just ran (see button handlers below), show
+    # its result once, then clear it — otherwise it would reappear on
+    # every rerun.
     if "update_result" in st.session_state:
         _show_update_result(st.session_state.pop("update_result"))
+    if "extraction_result" in st.session_state:
+        _show_extraction_result(st.session_state.pop("extraction_result"))
 
     try:
         overview = api_client.get_overview()
@@ -32,7 +36,9 @@ def render():
         col4.metric("Top keyword this month", overview["month_top_keyword"] or "—")
         col5.metric("Last updated", _format_last_scraped(overview.get("last_scraped")))
 
-    if st.button("🔄 Update now"):
+    col_update, col_extract = st.columns(2)
+
+    if col_update.button("🔄 Update now"):
         with st.spinner("Fetching latest news — this may take a minute..."):
             try:
                 result = api_client.trigger_update()
@@ -45,6 +51,19 @@ def render():
                 st.session_state["update_result"] = result
         st.rerun()
 
+    if col_extract.button("🧹 Extract articles"):
+        with st.spinner("Expiring stale content and extracting new articles — this may take a while..."):
+            try:
+                result = api_client.trigger_extraction()
+            except Exception as e:
+                st.session_state["extraction_result"] = {
+                    "status": "failed",
+                    "message": f"Request to backend failed: {e}",
+                }
+            else:
+                st.session_state["extraction_result"] = result
+        st.rerun()
+
 
 def _format_last_scraped(value):
     if not value:
@@ -54,6 +73,20 @@ def _format_last_scraped(value):
 
 
 def _show_update_result(result: dict):
+    status = result.get("status")
+    message = result.get("message", "")
+
+    if status == "success":
+        st.success(message)
+    elif status == "partial":
+        st.warning(message)
+    elif status == "failed":
+        st.error(message)
+    else:  # skipped
+        st.info(message)
+
+
+def _show_extraction_result(result: dict):
     status = result.get("status")
     message = result.get("message", "")
 

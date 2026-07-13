@@ -18,6 +18,9 @@ DEFAULT_TIMEOUT = 30
 # /update can take a while: GNews rate-limiting adds a deliberate ~1.1s
 # delay per request, across all languages and keyword chunks.
 UPDATE_TIMEOUT = 120
+# /articles/extract loads each pending article in a real browser — slower
+# per-item than /update, and scales with however many articles are pending.
+EXTRACT_TIMEOUT = 300
 
 
 def _get(path: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
@@ -28,6 +31,12 @@ def _get(path: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOU
 
 def _post(path: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
     response = requests.post(f"{settings.backend_api_url}{path}", params=params, timeout=timeout)
+    response.raise_for_status()
+    return response.json()
+
+
+def _put(path: str, json: Optional[dict] = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
+    response = requests.put(f"{settings.backend_api_url}{path}", json=json, timeout=timeout)
     response.raise_for_status()
     return response.json()
 
@@ -48,6 +57,15 @@ def trigger_update() -> dict:
 
 def get_scrape_status() -> dict:
     return _get("/scrape-status")
+
+
+# ── Extraction ──────────────────────────────────────────────────────────
+
+def trigger_extraction() -> dict:
+    """Triggers one extraction pass (expire stale content, then extract
+    every 'No Extraction' article). Uses a longer timeout since it loads
+    each pending article in a real browser."""
+    return _post("/articles/extract", timeout=EXTRACT_TIMEOUT)
 
 
 # ── Articles ────────────────────────────────────────────────────────────
@@ -72,6 +90,12 @@ def get_articles(
     if date_to:
         params["date_to"] = date_to
     return _get("/articles", params=params)
+
+
+def submit_manual_content(article_id: str, content: str) -> dict:
+    """Manually pastes an article's content — typically after automatic
+    extraction failed. Stored identically to a successful extraction."""
+    return _put(f"/articles/{article_id}/content", json={"content": content})
 
 
 # ── Stats ───────────────────────────────────────────────────────────────
