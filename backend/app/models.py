@@ -13,7 +13,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
-
+IngestionStatus = Literal["No Extraction", "Pending", "Successful", "Failed", "Expired"]
 class ArticleBase(BaseModel):
     """Fields common to every article, before it has a database id."""
     url: HttpUrl
@@ -23,7 +23,8 @@ class ArticleBase(BaseModel):
     published_at: datetime
     language: str
     matched_keywords: List[str] = Field(default_factory=list)
-
+    ingestion_status: IngestionStatus = "No Extraction"
+    content: Optional[str] = None
 
 class ArticleCreate(ArticleBase):
     """Shape the scraper builds before upserting into Mongo."""
