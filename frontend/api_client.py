@@ -62,10 +62,10 @@ def get_scrape_status() -> dict:
 # ── Extraction ──────────────────────────────────────────────────────────
 
 def trigger_extraction() -> dict:
-    """Triggers one extraction pass (expire stale content, then extract
-    every 'No Extraction' article). Uses a longer timeout since it loads
-    each pending article in a real browser."""
-    return _post("/articles/extract", timeout=EXTRACT_TIMEOUT)
+    """Starts an extraction run in the background and returns almost
+    immediately. Progress is visible by reloading the page — articles show
+    'Pending' while being processed, then settle into 'Successful'/'Failed'."""
+    return _post("/articles/extract")
 
 
 # ── Articles ────────────────────────────────────────────────────────────
@@ -97,6 +97,9 @@ def submit_manual_content(article_id: str, content: str) -> dict:
     extraction failed. Stored identically to a successful extraction."""
     return _put(f"/articles/{article_id}/content", json={"content": content})
 
+def retry_article_extraction(article_id: str) -> dict:
+    """Retries automatic extraction for exactly one Failed article."""
+    return _post(f"/articles/{article_id}/extract")
 
 # ── Stats ───────────────────────────────────────────────────────────────
 

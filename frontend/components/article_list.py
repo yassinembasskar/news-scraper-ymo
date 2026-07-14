@@ -65,6 +65,7 @@ def render():
         )
 
         if ingestion_status == "Failed":
+            _render_retry_button(article)
             _render_manual_content_form(article)
 
         st.divider()
@@ -88,3 +89,25 @@ def _render_manual_content_form(article: dict):
                 else:
                     st.success("Content saved.")
                     st.rerun()
+
+def _render_retry_button(article: dict):
+    """Lets the user retry automatic extraction for one Failed article,
+    as a lighter alternative to pasting content by hand."""
+    article_id = article["id"]
+    if st.button("🔁 Retry automatic extraction", key=f"retry_extract_{article_id}"):
+        with st.spinner("Retrying extraction..."):
+            try:
+                result = api_client.retry_article_extraction(article_id)
+            except Exception as e:
+                st.error(f"Retry failed: {e}")
+            else:
+                status = result.get("status")
+                if status == "Successful":
+                    st.success("Extraction succeeded.")
+                    st.rerun()
+                elif status == "already_running":
+                    st.warning(result.get("message"))
+                elif status == "not_found":
+                    st.error("Article no longer exists.")
+                else:
+                    st.error(result.get("message", "Extraction failed again."))

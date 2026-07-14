@@ -52,18 +52,28 @@ def render():
         st.rerun()
 
     if col_extract.button("🧹 Extract articles"):
-        with st.spinner("Expiring stale content and extracting new articles — this may take a while..."):
-            try:
-                result = api_client.trigger_extraction()
-            except Exception as e:
-                st.session_state["extraction_result"] = {
-                    "status": "failed",
-                    "message": f"Request to backend failed: {e}",
-                }
-            else:
-                st.session_state["extraction_result"] = result
+        try:
+            result = api_client.trigger_extraction()
+        except Exception as e:
+            st.session_state["extraction_result"] = {
+                "status": "error",
+                "message": f"Request to backend failed: {e}",
+            }
+        else:
+            st.session_state["extraction_result"] = result
         st.rerun()
 
+
+def _show_extraction_result(result: dict):
+    status = result.get("status")
+    message = result.get("message", "")
+
+    if status == "started":
+        st.info(message)
+    elif status == "already_running":
+        st.warning(message)
+    else:
+        st.error(message)
 
 def _format_last_scraped(value):
     if not value:
@@ -85,16 +95,3 @@ def _show_update_result(result: dict):
     else:  # skipped
         st.info(message)
 
-
-def _show_extraction_result(result: dict):
-    status = result.get("status")
-    message = result.get("message", "")
-
-    if status == "success":
-        st.success(message)
-    elif status == "partial":
-        st.warning(message)
-    elif status == "failed":
-        st.error(message)
-    else:  # skipped
-        st.info(message)

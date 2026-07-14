@@ -1,35 +1,60 @@
 """
 Router: extraction triggering.
 
-Thin HTTP wrapper around services.extractor.run_extraction() — no Mongo
-calls and no business logic here, just request/response shaping. All the
-actual work (expiring stale content, finding 'No Extraction' articles,
-running Playwright + trafilatura) already happens inside run_extraction().
+Kicks off one extraction pass as a background task and returns
+immediately — a full backlog can take many minutes (each article is
+loaded in a real browser, one at a time), far longer than any HTTP request
+should reasonably block for. Progress is visible by reloading the article
+list: articles show 'Pending' while being processed, then settle into
+'Successful'/'Failed'. There's no separate "job status" endpoint — the
+existing per-article ingestion_status via GET /articles already shows this.
 """
 
-from dataclasses import asdict
-from typing import List
-
-from fastapi import APIRouter
+from fastapi import APIRouter, BackgroundTasks
 from pydantic import BaseModel
 
-from app.services.extractor import run_extraction
+from app.services import extractor
 
 router = APIRouter()
 
 
-class ExtractionSummaryResponse(BaseModel):
-    status: str  # "success" | "partial" | "failed" | "skipped"
+class ExtractionTriggerResponse(BaseModel):
+    status: str  # "started" | "already_running"
     message: str
-    expired_articles: int = 0
-    extracted_articles: int = 0
-    failed_articles: int = 0
-    errors: List[str] = []
 
 
-@router.post("/articles/extract", response_model=ExtractionSummaryResponse)
-def trigger_extraction():
-    """Runs one extraction pass: expires stale content, then extracts
-    every article still in 'No Extraction' state. Safe to call repeatedly."""
-    summary = run_extraction()
-    return ExtractionSummaryResponse(**asdict(summary))
+@router.post("/articles/extract", response_model=ExtractionTriggerResponse)
+def trigger_extraction(background_tasks: BackgroundTasks):
+    """Starts an extraction run in the background. Safe to call
+    repeatedly — if one's already running, this reports that instead of
+    starting a second overlapping run."""
+    if extractor.is_extraction_running():
+        return ExtractionTriggerResponse(
+            status="already_running",
+            message="An extraction is already in progress. Reload in a bit to check progress.",
+        )
+
+    background_tasks.add_task(extractor.run_extraction_job)
+    return ExtractionTriggerResponse(
+        status="started",
+        message=(
+            "Extraction started in the background. Reload the page in a "
+            "minute or two to see progress — articles will show as "
+            "Pending while being processed."
+        ),
+    )
+
+
+class SingleExtractionResponse(BaseModel):
+    status: str  # "Successful" | "Failed" | "already_running" | "not_found"
+    message: str
+
+
+@router.post("/articles/{article_id}/extract", response_model=SingleExtractionResponse)
+def retry_single_extraction(article_id: str):
+    """Retries automatic extraction for exactly one article — the
+    per-article 'Retry extraction' button shown on Failed articles. Runs
+    synchronously (fast enough for one article) and refuses if a bulk
+    extraction is currently in progress rather than competing with it."""
+    result = extractor.extract_single_article(article_id)
+    return SingleExtractionResponse(status=result.status, message=result.message)
