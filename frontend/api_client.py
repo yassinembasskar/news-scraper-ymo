@@ -68,6 +68,16 @@ def trigger_extraction() -> dict:
     return _post("/articles/extract")
 
 
+# ── Embedding ───────────────────────────────────────────────────────────
+
+def trigger_embedding() -> dict:
+    """Starts an embedding run in the background and returns almost
+    immediately. Progress is visible by reloading the page — articles show
+    embedding_status 'Not Embedded' while pending, then settle into
+    'Embedded'/'Failed'."""
+    return _post("/articles/embed")
+
+
 # ── Articles ────────────────────────────────────────────────────────────
 
 def get_articles(

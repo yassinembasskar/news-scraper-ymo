@@ -21,10 +21,10 @@ from playwright.sync_api import sync_playwright
 
 # Replace these with the 4 real article URLs you want to test
 URLS = [
-    "https://example.com/article-1",
-    "https://example.com/article-2",
-    "https://example.com/article-3",
-    "https://example.com/article-4",
+    "https://telquel.ma/instant-t/2022/09/29/automobile-le-groupe-japonais-yazaki-inaugure-sa-4eme-usine-au-maroc-a-kenitra_1785998/",
+    "https://telquel.ma/instant-t/2026/07/13/e-paiements-bank-al-maghrib-abaisse-a-05-ht-les-frais-dinterchange-domestique-a-compter-du-1er-octobre-2026_1998695/",
+    "https://www.france24.com/en/middle-east/20260712-live-us-attacks-iran-over-ship-being-hit-in-strait-of-hormuz",
+    "https://www.aljazeera.net/politics/2026/4/22/%D9%87%D8%B1%D9%85%D8%B2-%D9%82%D8%B5%D8%A9-%D9%85%D8%B6%D9%8A%D9%82-%D9%81%D8%AA%D8%AD%D9%87-%D8%A3%D8%B5%D8%B9%D8%A8-%D9%85%D9%86-%D8%BA%D9%84%D9%82%D9%87",
 ]
 
 OUTPUT_DIR = Path("extracted_articles")
@@ -34,28 +34,28 @@ TIMEOUT_MS = 30000
 # headless browser differently than a normal visitor.
 USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0"
 )
 
 
 def extract_one(page, url: str):
     """Returns (status, text) for one URL. Never raises — failures are
-    captured and returned as a 'failed' status instead, matching the
+    captured and returned as a 'Failed' status instead, matching the
     ingestion_status values the real backend will use."""
     try:
         page.goto(url, wait_until="domcontentloaded", timeout=TIMEOUT_MS)
         html = page.content()
     except Exception as e:
-        return "failed", f"Could not load page: {e}"
+        return "Failed", f"Could not load page: {e}"
 
     text = trafilatura.extract(html)
     if not text or not text.strip():
-        return "failed", (
+        return "Failed", (
             "Page loaded, but no main content could be extracted "
             "(possible paywall, cookie wall, or unsupported page layout)."
         )
 
-    return "successful", text
+    return "Successful", text
 
 
 def main():

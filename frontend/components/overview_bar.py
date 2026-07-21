@@ -1,8 +1,8 @@
 """
 Overview bar: today/month totals + top keywords, last scrape time, and the
-manual "Update" and "Extract articles" buttons. Calls GET /stats/overview,
-POST /update, and POST /articles/extract via api_client — no direct HTTP
-calls here.
+manual "Update", "Extract articles", and "Embed articles" buttons. Calls
+GET /stats/overview, POST /update, POST /articles/extract, and
+POST /articles/embed via api_client — no direct HTTP calls here.
 """
 
 import streamlit as st
@@ -20,6 +20,8 @@ def render():
         _show_update_result(st.session_state.pop("update_result"))
     if "extraction_result" in st.session_state:
         _show_extraction_result(st.session_state.pop("extraction_result"))
+    if "embedding_result" in st.session_state:
+        _show_embedding_result(st.session_state.pop("embedding_result"))
 
     try:
         overview = api_client.get_overview()
@@ -36,7 +38,7 @@ def render():
         col4.metric("Top keyword this month", overview["month_top_keyword"] or "—")
         col5.metric("Last updated", _format_last_scraped(overview.get("last_scraped")))
 
-    col_update, col_extract = st.columns(2)
+    col_update, col_extract, col_embed = st.columns(3)
 
     if col_update.button("🔄 Update now"):
         with st.spinner("Fetching latest news — this may take a minute..."):
@@ -63,8 +65,32 @@ def render():
             st.session_state["extraction_result"] = result
         st.rerun()
 
+    if col_embed.button("🧠 Embed articles"):
+        try:
+            result = api_client.trigger_embedding()
+        except Exception as e:
+            st.session_state["embedding_result"] = {
+                "status": "error",
+                "message": f"Request to backend failed: {e}",
+            }
+        else:
+            st.session_state["embedding_result"] = result
+        st.rerun()
+
 
 def _show_extraction_result(result: dict):
+    status = result.get("status")
+    message = result.get("message", "")
+
+    if status == "started":
+        st.info(message)
+    elif status == "already_running":
+        st.warning(message)
+    else:
+        st.error(message)
+
+
+def _show_embedding_result(result: dict):
     status = result.get("status")
     message = result.get("message", "")
 
