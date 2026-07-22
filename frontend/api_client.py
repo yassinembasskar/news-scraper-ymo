@@ -78,6 +78,18 @@ def trigger_embedding() -> dict:
     return _post("/articles/embed")
 
 
+def get_embedding_run_status() -> dict:
+    """Live progress for the run currently in flight (or the last one, if
+    none is running) — {in_progress, total, processed}."""
+    return _get("/articles/embed/status")
+
+
+def stop_embedding() -> dict:
+    """Requests that the current embedding run stop after its in-flight
+    article finishes. Not instant — see the backend endpoint's docstring."""
+    return _post("/articles/embed/stop")
+
+
 # ── Articles ────────────────────────────────────────────────────────────
 
 def get_articles(

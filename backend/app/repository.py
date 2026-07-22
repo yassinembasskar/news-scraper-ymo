@@ -161,6 +161,62 @@ def set_embedding_in_progress(value: bool) -> None:
     )
 
 
+def set_embedding_progress(total: int, processed: int) -> None:
+    """Updates the live progress counters on the embedding-status document
+    — called once at the start of a run (processed=0) and again after each
+    article finishes, so the frontend can poll and show "X/Y done"."""
+    meta.update_one(
+        {"_id": META_EMBEDDING_DOC_ID},
+        {"$set": {"total": total, "processed": processed}},
+        upsert=True,
+    )
+
+
+def set_embedding_stop_requested(value: bool) -> None:
+    """Flips the stop_requested flag — set True by the stop endpoint, read
+    by the run loop between articles, reset back to False once a run
+    actually stops (whether via the flag or finishing naturally)."""
+    meta.update_one(
+        {"_id": META_EMBEDDING_DOC_ID},
+        {"$set": {"stop_requested": value}},
+        upsert=True,
+    )
+
+
+def reset_pending_embedding_articles() -> int:
+    """Resets any article stuck at embedding_status "Pending" back to "Not
+    Embedded" — called whenever a run stops (naturally, via a stop request,
+    or after a crash) so no article is left in a state that only makes
+    sense while a run is actively working on it. Returns the count reset."""
+    result = articles.update_many(
+        {"embedding_status": "Pending"},
+        {"$set": {"embedding_status": "Not Embedded"}},
+    )
+    return result.modified_count
+
+
+def set_embedding_rate(avg_seconds_per_article: float) -> None:
+    """Updates the exponential moving average of seconds-per-article on the
+    embedding-status document — see EmbeddingRunStatus.avg_seconds_per_article
+    for why this is recency-weighted rather than a plain run-long average."""
+    meta.update_one(
+        {"_id": META_EMBEDDING_DOC_ID},
+        {"$set": {"avg_seconds_per_article": avg_seconds_per_article}},
+        upsert=True,
+    )
+
+
+def set_embedding_started(started_at: datetime) -> None:
+    """Records when the current run began — used to estimate time
+    remaining (elapsed / processed * articles left) once progress starts
+    coming in. Called once, right before the per-article loop starts."""
+    meta.update_one(
+        {"_id": META_EMBEDDING_DOC_ID},
+        {"$set": {"started_at": started_at}},
+        upsert=True,
+    )
+
+
 def set_embedding_run_outcome(last_run_at: datetime, last_run_status: str) -> None:
     """Records the outcome of the most recent embedding run without
     touching in_progress — kept separate from set_embedding_in_progress()
@@ -292,9 +348,13 @@ def set_article_embedding_result(article_id: str, chunk_ids: List[str], status: 
     """Stores the result of embedding one article's chunks into Pinecone.
     number_of_chunks is derived from len(chunk_ids) rather than taken as a
     separate argument, so the two can never drift out of sync with each
-    other."""
+    other. The ingestion_status: "Successful" filter is a hard guard, not
+    just belt-and-suspenders: a Failed/Pending/Expired article has no real
+    content, so it must never be marked Pending/Embedded — if the caller
+    somehow passes one anyway (e.g. a stale candidate list), this silently
+    no-ops instead of corrupting that article's state."""
     articles.update_one(
-        {"_id": ObjectId(article_id)},
+        {"_id": ObjectId(article_id), "ingestion_status": "Successful"},
         {"$set": {
             "chunk_ids": chunk_ids,
             "number_of_chunks": len(chunk_ids),
@@ -308,9 +368,10 @@ def set_article_embedding_status(article_id: str, status: str) -> None:
     touching chunk_ids/number_of_chunks — used on failure, where nothing
     actually changed in Pinecone, so any existing chunk_ids (e.g. from an
     earlier partial attempt) are deliberately left alone rather than
-    wiped or guessed at."""
+    wiped or guessed at. Same ingestion_status: "Successful" guard as
+    set_article_embedding_result() — see its docstring."""
     articles.update_one(
-        {"_id": ObjectId(article_id)},
+        {"_id": ObjectId(article_id), "ingestion_status": "Successful"},
         {"$set": {"embedding_status": status}},
     )
 

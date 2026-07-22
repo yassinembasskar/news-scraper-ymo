@@ -51,6 +51,11 @@ def render():
         st.write("No articles match this filter.")
         return
 
+    try:
+        embedding_running = api_client.get_embedding_run_status().get("in_progress", False)
+    except Exception:
+        embedding_running = False
+
     for article in articles:
         lang_tag = (article.get("language") or "").upper()
         published = article.get("published_at", "")
@@ -58,6 +63,16 @@ def render():
         source = article.get("source_name") or "Unknown source"
         ingestion_status = article.get("ingestion_status", "No Extraction")
         embedding_status = article.get("embedding_status", "Not Embedded")
+        # A run in progress only flips the article it's actively working on
+        # to "Pending" in Mongo — the rest of the *eligible* queue still
+        # reads "Not Embedded" until their turn comes. Relabel those for
+        # display only (not written back). Only articles with a successful
+        # extraction are ever actually candidates for embedding (see
+        # repository.get_articles_pending_embedding) — a Failed/Pending/
+        # Expired extraction must keep reading "Not Embedded" since the job
+        # will never touch it, no matter how long it runs.
+        if embedding_running and embedding_status == "Not Embedded" and ingestion_status == "Successful":
+            embedding_status = "Pending"
 
         st.markdown(
             f"**[{article['title']}]({article['url']})**  \n"

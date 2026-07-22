@@ -23,6 +23,7 @@ frontend/venv/
 # OS
 .DS_Store
 Thumbs.db
+backend/corp-certs
 
 # Streamlit (frontend, once it exists)
 .streamlit/secrets.toml

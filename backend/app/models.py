@@ -56,7 +56,22 @@ class EmbeddingRunStatus(BaseModel):
     """The single `meta` document (_id: "embedding_status") tracking
     embedding-job state. in_progress is the Mongo-backed guard against
     overlapping runs — no staleness timeout yet, so a run that crashes
-    without reaching its finally block would need a manual reset."""
+    without reaching its finally block would need a manual reset.
+    total/processed reflect the run currently in progress (or the last
+    completed one) — used to show live progress in the frontend."""
     last_run_at: Optional[datetime] = None
     last_run_status: Optional[Literal["success", "partial", "failed"]] = None
     in_progress: bool = False
+    total: int = 0
+    processed: int = 0
+    started_at: Optional[datetime] = None
+    # Set by the stop endpoint, checked by the loop between articles (there's
+    # no safe way to interrupt a Python thread mid-encode/-upsert) — the run
+    # exits cleanly at the next opportunity rather than instantly.
+    stop_requested: bool = False
+    # Exponential moving average of seconds-per-article, recomputed after
+    # every article. Used instead of a plain elapsed/processed average so
+    # the ETA reflects the current rate, not one dragged down forever by a
+    # slow first article (e.g. one-time model/thread warmup on a fresh
+    # container start).
+    avg_seconds_per_article: Optional[float] = None

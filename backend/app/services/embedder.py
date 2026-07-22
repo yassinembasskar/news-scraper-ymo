@@ -31,10 +31,11 @@ Workflow, every time it's triggered:
   4. Log     -> one embedding_runs document for the whole run.
 """
 
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -50,6 +51,10 @@ from app.services.chunking import chunk_text
 EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
 PINECONE_INDEX_NAME = "yazaki"
 UPSERT_BATCH_SIZE = 100
+# Weight given to each new per-article duration when updating the
+# seconds-per-article moving average — higher reacts faster to changes in
+# speed, at the cost of more jitter in the reported ETA.
+RATE_EMA_ALPHA = 0.3
 
 
 @dataclass
@@ -114,11 +119,23 @@ def run_embedding() -> EmbeddingSummary:
     pc = Pinecone(api_key=settings.pinecone_api_key)
     index = pc.Index(PINECONE_INDEX_NAME)
 
+    total = len(candidates)
     embedded_count = 0
     failed_count = 0
     errors: List[str] = []
+    repository.set_embedding_started(now)
+    repository.set_embedding_progress(total, 0)
 
+    avg_seconds_per_article: Optional[float] = None
+    last_checkpoint = time.monotonic()
+
+    stopped = False
     for article in candidates:
+        status = repository.get_embedding_status()
+        if status and status.stop_requested:
+            stopped = True
+            break
+
         repository.set_article_embedding_status(article.id, "Pending")
         try:
             chunk_ids = _embed_one_article(model, index, article)
@@ -129,7 +146,20 @@ def run_embedding() -> EmbeddingSummary:
             failed_count += 1
             errors.append(f"{article.title}: {e}")
 
-    if failed_count == 0:
+        checkpoint = time.monotonic()
+        duration = checkpoint - last_checkpoint
+        last_checkpoint = checkpoint
+        avg_seconds_per_article = (
+            duration if avg_seconds_per_article is None
+            else RATE_EMA_ALPHA * duration + (1 - RATE_EMA_ALPHA) * avg_seconds_per_article
+        )
+
+        repository.set_embedding_progress(total, embedded_count + failed_count)
+        repository.set_embedding_rate(avg_seconds_per_article)
+
+    if stopped:
+        run_status = "stopped"
+    elif failed_count == 0:
         run_status = "success"
     elif embedded_count == 0:
         run_status = "failed"
@@ -168,14 +198,25 @@ def is_embedding_running() -> bool:
     return bool(status and status.in_progress)
 
 
+def request_embedding_stop() -> bool:
+    """Asks the current run to stop after the article it's working on
+    right now — there's no safe way to interrupt a Python thread mid
+    encode()/upsert(). Returns False if nothing is running to stop."""
+    if not is_embedding_running():
+        return False
+    repository.set_embedding_stop_requested(True)
+    return True
+
+
 def run_embedding_job() -> None:
     """Background-task entrypoint: guards against overlapping runs via
     the Mongo in_progress flag, runs run_embedding(), and always clears
-    the flag in a finally block — whether the run succeeded, partially
-    failed, or raised. Nothing is waiting on a return value here — the
-    endpoint that scheduled this already responded. Progress is only
-    visible by reloading the article list and checking each article's
-    embedding_status; the final summary is logged server-side."""
+    the flag (and stop_requested, and any article left stuck at
+    "Pending") in a finally block — whether the run succeeded, partially
+    failed, was stopped, or raised. Nothing is waiting on a return value
+    here — the endpoint that scheduled this already responded. Progress
+    is only visible by reloading the article list and checking each
+    article's embedding_status; the final summary is logged server-side."""
     if is_embedding_running():
         return
 
@@ -185,3 +226,5 @@ def run_embedding_job() -> None:
         print(f"[embedding] {summary.message}")
     finally:
         repository.set_embedding_in_progress(False)
+        repository.set_embedding_stop_requested(False)
+        repository.reset_pending_embedding_articles()

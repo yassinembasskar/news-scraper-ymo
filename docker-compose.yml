@@ -12,10 +12,26 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # One-shot: restores backend/yazaki_news/ (a mongodump snapshot, checked
+  # into git) into the mongo container on every `docker compose up`. This is
+  # the sync mechanism between machines — dump on one, commit + push, then
+  # `git pull` + `docker compose up` on the other pulls it in automatically.
+  # NOTE: this DROPS and OVERWRITES the running database every time, so any
+  # local changes made since the last dump are lost unless re-dumped first.
+  mongo-restore:
+    image: mongo:8.0
+    volumes:
+      - ./backend/yazaki_news:/dump/yazaki_news:ro
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: mongorestore --uri="mongodb://mongo:27017" --drop --db=yazaki_news /dump/yazaki_news
+    restart: "no"
+
   backend:
     build:
       context: ./backend
-      dockerfile: DockerFile
+      dockerfile: Dockerfile
     ports:
       - "8000:8000"
     env_file:
@@ -28,15 +44,16 @@ services:
       - MONGO_URI=mongodb://mongo:27017
     volumes:
       # Persistent home for the HuggingFace model cache, independent of any
-      # single container/image. The Dockerfile already bakes the embedding
-      # model into the image at build time; on first startup Docker seeds
-      # this (empty) named volume from that same image directory, so no
-      # network call is needed even then. Every later `down`/`up` or
-      # rebuild reuses this volume instead of re-downloading.
+      # single container/image (see backend/Dockerfile for why it's not
+      # baked into the image). Seeded once via `docker cp` from a machine
+      # with a working huggingface.co connection; every later `down`/`up`
+      # or image rebuild reuses this volume instead of re-downloading.
       - hf-model-cache:/root/.cache/huggingface
     depends_on:
       mongo:
         condition: service_healthy
+      mongo-restore:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 5s
