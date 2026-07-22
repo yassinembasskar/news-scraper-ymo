@@ -13,7 +13,6 @@ out of sync with each other (a Mongo document claiming "Not Embedded"
 while stale vectors linger in Pinecone, or vice versa).
 """
 
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -25,6 +24,7 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 from pinecone import Pinecone
 
+from app.config import settings
 from app.database import articles, meta
 from app.models import ArticleCreate, ArticleOut, EmbeddingRunStatus, ScrapeStatus
 from app.database import articles, meta, db
@@ -364,7 +364,7 @@ def expire_old_content(cutoff: datetime) -> int:
     ]
 
     if chunk_ids_to_delete:
-        pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+        pc = Pinecone(api_key=settings.pinecone_api_key)
         index = pc.Index(PINECONE_INDEX_NAME)
         for i in range(0, len(chunk_ids_to_delete), PINECONE_DELETE_BATCH_SIZE):
             index.delete(ids=chunk_ids_to_delete[i : i + PINECONE_DELETE_BATCH_SIZE])

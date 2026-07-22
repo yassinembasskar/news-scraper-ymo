@@ -6,9 +6,9 @@ immediately — embedding + upserting a backlog of articles can take
 several minutes (each article is chunked, embedded, and upserted into
 Pinecone one at a time), far longer than any HTTP request should
 reasonably block for. Progress is visible by reloading the article list:
-articles show their embedding_status ("Not Embedded" -> "Embedded"/
-"Failed"). There's no separate "job status" endpoint — same pattern as
-/articles/extract.
+articles show their embedding_status ("Not Embedded" -> "Pending" ->
+"Embedded"/"Failed"). There's no separate "job status" endpoint — same
+pattern as /articles/extract.
 """
 
 from fastapi import APIRouter, BackgroundTasks
@@ -41,6 +41,7 @@ def trigger_embedding(background_tasks: BackgroundTasks):
         message=(
             "Embedding started in the background. Reload the page in a "
             "minute or two to see progress — articles will show as "
-            "'Not Embedded' until they settle into 'Embedded'/'Failed'."
+            "'Pending' while being processed, then settle into "
+            "'Embedded'/'Failed'."
         ),
     )

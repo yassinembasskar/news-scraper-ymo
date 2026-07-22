@@ -57,10 +57,12 @@ def render():
         keywords = ", ".join(article.get("matched_keywords", [])) or "—"
         source = article.get("source_name") or "Unknown source"
         ingestion_status = article.get("ingestion_status", "No Extraction")
+        embedding_status = article.get("embedding_status", "Not Embedded")
 
         st.markdown(
             f"**[{article['title']}]({article['url']})**  \n"
-            f"{lang_tag} · {published} · {source} · Extraction: {ingestion_status}  \n"
+            f"{lang_tag} · {published} · {source} · Extraction: {ingestion_status} · "
+            f"Embedding: {embedding_status}  \n"
             f"Keywords: {keywords}"
         )
 

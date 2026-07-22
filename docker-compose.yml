@@ -15,6 +15,7 @@ services:
   backend:
     build:
       context: ./backend
+      dockerfile: DockerFile
     ports:
       - "8000:8000"
     env_file:
@@ -25,6 +26,14 @@ services:
       # network, services reach each other by service name, not localhost —
       # "mongo" here resolves to the mongo container automatically.
       - MONGO_URI=mongodb://mongo:27017
+    volumes:
+      # Persistent home for the HuggingFace model cache, independent of any
+      # single container/image. The Dockerfile already bakes the embedding
+      # model into the image at build time; on first startup Docker seeds
+      # this (empty) named volume from that same image directory, so no
+      # network call is needed even then. Every later `down`/`up` or
+      # rebuild reuses this volume instead of re-downloading.
+      - hf-model-cache:/root/.cache/huggingface
     depends_on:
       mongo:
         condition: service_healthy
@@ -53,3 +62,4 @@ services:
 
 volumes:
   mongo-data:
+  hf-model-cache:

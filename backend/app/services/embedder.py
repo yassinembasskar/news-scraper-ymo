@@ -23,15 +23,14 @@ Workflow, every time it's triggered:
                 embedding_status != "Embedded" (incremental; "Failed"
                 articles are naturally retried next run, no separate
                 retry path needed).
-  3. Embed   -> for each candidate: chunk its content, embed every chunk,
-                upsert into Pinecone, then record chunk_ids /
-                number_of_chunks / embedding_status on that article. A
-                failure on one article is logged and does not abort the
-                run — it's simply picked up again next run.
+  3. Embed   -> for each candidate: mark 'Pending', chunk its content,
+                embed every chunk, upsert into Pinecone, then record
+                chunk_ids / number_of_chunks / embedding_status on that
+                article. A failure on one article is logged and does not
+                abort the run — it's simply picked up again next run.
   4. Log     -> one embedding_runs document for the whole run.
 """
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +44,7 @@ from pinecone import Pinecone
 from sentence_transformers import SentenceTransformer
 
 from app import repository
+from app.config import settings
 from app.services.chunking import chunk_text
 
 EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
@@ -111,7 +111,7 @@ def run_embedding() -> EmbeddingSummary:
         return summary
 
     model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-    pc = Pinecone(api_key=os.environ["PINECONE_API_KEY"])
+    pc = Pinecone(api_key=settings.pinecone_api_key)
     index = pc.Index(PINECONE_INDEX_NAME)
 
     embedded_count = 0
@@ -119,6 +119,7 @@ def run_embedding() -> EmbeddingSummary:
     errors: List[str] = []
 
     for article in candidates:
+        repository.set_article_embedding_status(article.id, "Pending")
         try:
             chunk_ids = _embed_one_article(model, index, article)
             repository.set_article_embedding_result(article.id, chunk_ids, "Embedded")

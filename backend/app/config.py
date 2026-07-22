@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     # GNews API
     gnews_api_key: str
 
+    # Pinecone (article chunk embeddings)
+    pinecone_api_key: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

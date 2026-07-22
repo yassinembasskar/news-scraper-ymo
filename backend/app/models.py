@@ -14,7 +14,7 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, HttpUrl
 
 IngestionStatus = Literal["No Extraction", "Pending", "Successful", "Failed", "Expired"]
-EmbeddingStatus = Literal["Not Embedded", "Embedded", "Failed"]
+EmbeddingStatus = Literal["Not Embedded", "Pending", "Embedded", "Failed"]
 class ArticleBase(BaseModel):
     """Fields common to every article, before it has a database id."""
     url: HttpUrl
