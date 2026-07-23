@@ -10,7 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app import database
+from app import database, repository
 from app.routers import articles, embedding, extraction, stats, update
 
 
@@ -25,6 +25,18 @@ async def lifespan(app: FastAPI):
             "and make sure the database is running."
         )
     database.init_indexes()
+
+    # Neither the extraction lock (in-process, so already gone) nor the
+    # embedding in_progress flag (Mongo-backed, survives a restart) can be
+    # trusted to reflect reality if this process was killed outright rather
+    # than shut down cleanly — their finally blocks wouldn't have run. Reset
+    # both job guards and any article stuck at "Pending" from either job so
+    # nothing is left permanently stuck or permanently unrunnable.
+    repository.reset_pending_extraction_articles()
+    repository.reset_pending_embedding_articles()
+    repository.set_embedding_in_progress(False)
+    repository.set_embedding_stop_requested(False)
+
     yield
     # No explicit shutdown cleanup needed — MongoClient closes its
     # connections automatically when the process exits.

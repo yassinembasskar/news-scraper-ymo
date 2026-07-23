@@ -184,6 +184,7 @@ def run_extraction_job() -> None:
         summary = run_extraction()
         print(f"[extraction] {summary.message}")
     finally:
+        repository.reset_pending_extraction_articles()
         _extraction_lock.release()
 
 
@@ -235,4 +236,5 @@ def extract_single_article(article_id: str) -> SingleExtractionResult:
         repository.set_ingestion_status(article_id, "Failed")
         return SingleExtractionResult(status="Failed", message=text)
     finally:
+        repository.reset_pending_extraction_articles()
         _extraction_lock.release()

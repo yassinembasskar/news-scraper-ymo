@@ -321,6 +321,22 @@ def set_ingestion_status(article_id: str, status: str) -> None:
     )
 
 
+def reset_pending_extraction_articles() -> int:
+    """Resets any article stuck at ingestion_status "Pending" back to "No
+    Extraction" — called whenever an extraction run stops (naturally or
+    after a crash) so no article is left in a state that only makes sense
+    while a run is actively working on it (same failure mode as the
+    embedding job's equivalent — see reset_pending_embedding_articles).
+    Without this, such an article would never be picked up again, since
+    get_articles_pending_extraction() only looks for "No Extraction".
+    Returns the count reset."""
+    result = articles.update_many(
+        {"ingestion_status": "Pending"},
+        {"$set": {"ingestion_status": "No Extraction"}},
+    )
+    return result.modified_count
+
+
 def set_ingestion_status_bulk(article_ids: List[str], status: str) -> None:
     """Bulk version of set_ingestion_status — e.g. marking a whole batch as
     'Pending' at once, or a whole batch as 'Expired' at once, when the user

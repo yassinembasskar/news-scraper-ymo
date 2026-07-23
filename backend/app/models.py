@@ -60,7 +60,7 @@ class EmbeddingRunStatus(BaseModel):
     total/processed reflect the run currently in progress (or the last
     completed one) — used to show live progress in the frontend."""
     last_run_at: Optional[datetime] = None
-    last_run_status: Optional[Literal["success", "partial", "failed"]] = None
+    last_run_status: Optional[Literal["success", "partial", "failed", "stopped"]] = None
     in_progress: bool = False
     total: int = 0
     processed: int = 0
