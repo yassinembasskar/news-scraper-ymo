@@ -13,6 +13,7 @@ out of sync with each other (a Mongo document claiming "Not Embedded"
 while stale vectors linger in Pinecone, or vice versa).
 """
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -26,11 +27,12 @@ from pinecone import Pinecone
 
 from app.config import settings
 from app.database import articles, meta
-from app.models import ArticleCreate, ArticleOut, EmbeddingRunStatus, ScrapeStatus
+from app.models import ArticleCreate, ArticleOut, EmbeddingRunStatus, ScoringRunStatus, ScrapeStatus
 from app.database import articles, meta, db
 
 META_DOC_ID = "scrape_status"
 META_EMBEDDING_DOC_ID = "embedding_status"
+META_SCORING_DOC_ID = "scoring_status"
 # Must match services/embedder.py's PINECONE_INDEX_NAME — the embedding job
 # and this cleanup path have to agree on which index they're both touching.
 PINECONE_INDEX_NAME = "yazaki"
@@ -50,21 +52,26 @@ def upsert_article(article: ArticleCreate) -> bool:
     runs). Returns True if this was a new article, False if it updated
     an existing one.
 
-    ingestion_status, content, and the embedding fields (chunk_ids,
-    number_of_chunks, embedding_status) are deliberately excluded from the
-    overwrite: they belong to the extraction/embedding workflows, not to
-    GNews data. An article re-fetched by a later scrape (e.g. during a
-    catch-up retry that re-covers a date range) must never wipe out
-    previously-extracted content, previously-embedded chunks, or reset
-    their statuses back to their initial values — $setOnInsert only
-    applies these on a genuinely new document.
+    ingestion_status, content, the embedding fields (chunk_ids,
+    number_of_chunks, embedding_status), and the scoring fields
+    (relativity_score, scored_status, score_explanation) are deliberately
+    excluded from the overwrite: they belong to the extraction/embedding/
+    scoring workflows, not to GNews data. An article re-fetched by a later
+    scrape (e.g. during a catch-up retry that re-covers a date range) must
+    never wipe out previously-extracted content, previously-embedded
+    chunks, previously-computed scores, or reset their statuses back to
+    their initial values — $setOnInsert only applies these on a genuinely
+    new document.
     """
     data = article.model_dump()
     data["url"] = str(data["url"])  # HttpUrl -> plain string for storage
 
     set_on_insert = {
         key: data.pop(key)
-        for key in ("ingestion_status", "content", "chunk_ids", "number_of_chunks", "embedding_status")
+        for key in (
+            "ingestion_status", "content", "chunk_ids", "number_of_chunks", "embedding_status",
+            "relativity_score", "scored_status", "score_explanation",
+        )
     }
 
     result = articles.update_one(
@@ -85,14 +92,25 @@ def get_articles(
     date_to: Optional[datetime] = None,
 ) -> List[ArticleOut]:
     """Returns articles matching the given filters, newest first.
-    Any filter left as None is simply not applied."""
+    Any filter left as None is simply not applied.
+
+    keyword is a case-insensitive substring search against the article's
+    title and, when it has one, its extracted content — not a lookup
+    against matched_keywords (the tag recorded at scrape time for whichever
+    search term originally found the article). This means the filter finds
+    the keyword anywhere it actually appears in the article, not just
+    articles that happen to have been tagged with it as an exact keyword."""
     query: dict = {}
 
     if language:
         query["language"] = language
 
     if keyword:
-        query["matched_keywords"] = keyword
+        pattern = re.escape(keyword)
+        query["$or"] = [
+            {"title": {"$regex": pattern, "$options": "i"}},
+            {"content": {"$regex": pattern, "$options": "i"}},
+        ]
 
     if date_from or date_to:
         date_filter = {}
@@ -230,6 +248,95 @@ def set_embedding_run_outcome(last_run_at: datetime, last_run_status: str) -> No
     )
 
 
+def get_scoring_status() -> Optional[ScoringRunStatus]:
+    """Returns the current scoring-job status, or None if the scoring job
+    has never run yet."""
+    doc = meta.find_one({"_id": META_SCORING_DOC_ID})
+    if doc is None:
+        return None
+    doc = dict(doc)
+    doc.pop("_id")
+    return ScoringRunStatus(**doc)
+
+
+def set_scoring_status(status: ScoringRunStatus) -> None:
+    """Upserts the single scoring-status document."""
+    meta.update_one(
+        {"_id": META_SCORING_DOC_ID},
+        {"$set": status.model_dump()},
+        upsert=True,
+    )
+
+
+def set_scoring_in_progress(value: bool) -> None:
+    """Flips just the in_progress flag on the scoring-status document —
+    same Mongo-backed overlap guard as set_embedding_in_progress()."""
+    meta.update_one(
+        {"_id": META_SCORING_DOC_ID},
+        {"$set": {"in_progress": value}},
+        upsert=True,
+    )
+
+
+def set_scoring_progress(total: int, processed: int) -> None:
+    """Updates the live progress counters on the scoring-status document."""
+    meta.update_one(
+        {"_id": META_SCORING_DOC_ID},
+        {"$set": {"total": total, "processed": processed}},
+        upsert=True,
+    )
+
+
+def set_scoring_stop_requested(value: bool) -> None:
+    """Flips the stop_requested flag — same pattern as
+    set_embedding_stop_requested()."""
+    meta.update_one(
+        {"_id": META_SCORING_DOC_ID},
+        {"$set": {"stop_requested": value}},
+        upsert=True,
+    )
+
+
+def reset_pending_scoring_articles() -> int:
+    """Resets any article stuck at scored_status "Pending" back to "Not
+    Scored" — called whenever a scoring run stops (naturally, via a stop
+    request, or after a crash). Returns the count reset."""
+    result = articles.update_many(
+        {"scored_status": "Pending"},
+        {"$set": {"scored_status": "Not Scored"}},
+    )
+    return result.modified_count
+
+
+def set_scoring_rate(avg_seconds_per_article: float) -> None:
+    """Updates the exponential moving average of seconds-per-article on the
+    scoring-status document — see set_embedding_rate()."""
+    meta.update_one(
+        {"_id": META_SCORING_DOC_ID},
+        {"$set": {"avg_seconds_per_article": avg_seconds_per_article}},
+        upsert=True,
+    )
+
+
+def set_scoring_started(started_at: datetime) -> None:
+    """Records when the current scoring run began."""
+    meta.update_one(
+        {"_id": META_SCORING_DOC_ID},
+        {"$set": {"started_at": started_at}},
+        upsert=True,
+    )
+
+
+def set_scoring_run_outcome(last_run_at: datetime, last_run_status: str) -> None:
+    """Records the outcome of the most recent scoring run without touching
+    in_progress — see set_embedding_run_outcome()."""
+    meta.update_one(
+        {"_id": META_SCORING_DOC_ID},
+        {"$set": {"last_run_at": last_run_at, "last_run_status": last_run_status}},
+        upsert=True,
+    )
+
+
 def log_scrape_run(
     status: str,
     message: str,
@@ -274,6 +381,25 @@ def log_embedding_run(
         "status": status,
         "message": message,
         "embedded_articles": embedded_articles,
+        "failed_articles": failed_articles,
+        "errors": errors,
+        "logged_at": datetime.now(timezone.utc),
+    })
+
+
+def log_scoring_run(
+    status: str,
+    message: str,
+    scored_articles: int,
+    failed_articles: int,
+    errors: List[str],
+) -> None:
+    """Appends a permanent record of one scoring run to the scoring_runs
+    collection — the scoring-job counterpart to log_embedding_run()."""
+    db["scoring_runs"].insert_one({
+        "status": status,
+        "message": message,
+        "scored_articles": scored_articles,
         "failed_articles": failed_articles,
         "errors": errors,
         "logged_at": datetime.now(timezone.utc),
@@ -392,6 +518,47 @@ def set_article_embedding_status(article_id: str, status: str) -> None:
     )
 
 
+def set_article_scoring_result(article_id: str, score: int, explanation: dict, status: str) -> None:
+    """Stores the result of scoring one article against the relevance
+    tree. The embedding_status: "Embedded" filter is a hard guard, same
+    reasoning as set_article_embedding_result()'s ingestion_status guard:
+    an article that isn't actually Embedded has no chunk vectors to score,
+    so it must never be marked Pending/Scored — a stale candidate list
+    would just silently no-op here instead of corrupting that article."""
+    articles.update_one(
+        {"_id": ObjectId(article_id), "embedding_status": "Embedded"},
+        {"$set": {
+            "relativity_score": score,
+            "score_explanation": explanation,
+            "scored_status": status,
+        }},
+    )
+
+
+def set_article_scoring_status(article_id: str, status: str) -> None:
+    """Updates just the scored_status for one article, without touching
+    relativity_score/score_explanation — used on failure, where nothing
+    was actually computed. Same embedding_status: "Embedded" guard as
+    set_article_scoring_result()."""
+    articles.update_one(
+        {"_id": ObjectId(article_id), "embedding_status": "Embedded"},
+        {"$set": {"scored_status": status}},
+    )
+
+
+def get_articles_pending_scoring() -> List[ArticleOut]:
+    """Returns every embedded article that hasn't been scored yet — the
+    candidate pool for the relativity-scoring job. Mirrors
+    get_articles_pending_embedding(); scored_status != "Scored" (rather
+    than == "Not Scored") means a previously-"Failed" article is naturally
+    retried on the next run."""
+    cursor = articles.find({
+        "embedding_status": "Embedded",
+        "scored_status": {"$ne": "Scored"},
+    })
+    return [ArticleOut(**_serialize_article(doc)) for doc in cursor]
+
+
 def get_articles_pending_embedding() -> List[ArticleOut]:
     """Returns every successfully-extracted article that hasn't been
     embedded yet — the candidate pool for the embedding job. Mirrors
@@ -416,9 +583,15 @@ def expire_old_content(cutoff: datetime) -> int:
     (nothing to change).
 
     Also deletes each expiring article's vectors from Pinecone (using its
-    stored chunk_ids) and resets chunk_ids/number_of_chunks/embedding_status
-    back to their pre-embedding defaults, so the Mongo document accurately
-    reflects that nothing is in Pinecone anymore once content is cleared.
+    stored chunk_ids) and clears chunk_ids/number_of_chunks, so the Mongo
+    document accurately reflects that nothing is in Pinecone anymore once
+    content is cleared. embedding_status is set to "Expired" rather than
+    reset to "Not Embedded" — the two mean different things: "Not Embedded"
+    is "never attempted", "Expired" is "was embedded, then its vectors were
+    deliberately removed" (and, since get_articles_pending_embedding()
+    filters on ingestion_status == "Successful", an Expired article is
+    never re-picked-up regardless of which of the two values it holds; the
+    distinction is purely for accurate reporting).
     Pinecone deletes are batched across all expiring articles in one pass
     (rather than one delete call per article) — cheaper, and there's no
     correctness reason to keep them separate since every expiring article
@@ -453,7 +626,7 @@ def expire_old_content(cutoff: datetime) -> int:
             "ingestion_status": "Expired",
             "chunk_ids": [],
             "number_of_chunks": 0,
-            "embedding_status": "Not Embedded",
+            "embedding_status": "Expired",
         }},
     )
     return result.modified_count

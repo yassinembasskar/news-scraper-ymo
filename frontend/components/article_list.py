@@ -56,6 +56,11 @@ def render():
     except Exception:
         embedding_running = False
 
+    try:
+        scoring_running = api_client.get_scoring_run_status().get("in_progress", False)
+    except Exception:
+        scoring_running = False
+
     for article in articles:
         lang_tag = (article.get("language") or "").upper()
         published = article.get("published_at", "")
@@ -63,21 +68,31 @@ def render():
         source = article.get("source_name") or "Unknown source"
         ingestion_status = article.get("ingestion_status", "No Extraction")
         embedding_status = article.get("embedding_status", "Not Embedded")
+        scored_status = article.get("scored_status", "Not Scored")
+        relativity_score = article.get("relativity_score")
         # A run in progress only flips the article it's actively working on
         # to "Pending" in Mongo — the rest of the *eligible* queue still
-        # reads "Not Embedded" until their turn comes. Relabel those for
-        # display only (not written back). Only articles with a successful
-        # extraction are ever actually candidates for embedding (see
-        # repository.get_articles_pending_embedding) — a Failed/Pending/
-        # Expired extraction must keep reading "Not Embedded" since the job
-        # will never touch it, no matter how long it runs.
+        # reads "Not Embedded"/"Not Scored" until their turn comes. Relabel
+        # those for display only (not written back). Only articles with a
+        # successful extraction are ever candidates for embedding (see
+        # repository.get_articles_pending_embedding), and only Embedded
+        # articles are ever candidates for scoring (see
+        # repository.get_articles_pending_scoring) — anything else must
+        # keep reading its default status since the job will never touch
+        # it, no matter how long it runs.
         if embedding_running and embedding_status == "Not Embedded" and ingestion_status == "Successful":
             embedding_status = "Pending"
+        if scoring_running and scored_status == "Not Scored" and embedding_status == "Embedded":
+            scored_status = "Pending"
+
+        scoring_line = f"Scoring: {scored_status}"
+        if scored_status == "Scored" and relativity_score is not None:
+            scoring_line += f" ({relativity_score})"
 
         st.markdown(
             f"**[{article['title']}]({article['url']})**  \n"
             f"{lang_tag} · {published} · {source} · Extraction: {ingestion_status} · "
-            f"Embedding: {embedding_status}  \n"
+            f"Embedding: {embedding_status} · {scoring_line}  \n"
             f"Keywords: {keywords}"
         )
 

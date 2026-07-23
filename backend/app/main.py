@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import database, repository
-from app.routers import articles, embedding, extraction, stats, update
+from app.routers import articles, embedding, extraction, scoring, stats, update
 
 
 @asynccontextmanager
@@ -36,6 +36,9 @@ async def lifespan(app: FastAPI):
     repository.reset_pending_embedding_articles()
     repository.set_embedding_in_progress(False)
     repository.set_embedding_stop_requested(False)
+    repository.reset_pending_scoring_articles()
+    repository.set_scoring_in_progress(False)
+    repository.set_scoring_stop_requested(False)
 
     yield
     # No explicit shutdown cleanup needed — MongoClient closes its
@@ -52,6 +55,7 @@ app.include_router(articles.router)
 app.include_router(stats.router)
 app.include_router(extraction.router)
 app.include_router(embedding.router)
+app.include_router(scoring.router)
 
 
 @app.get("/health")

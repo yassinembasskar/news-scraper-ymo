@@ -14,7 +14,8 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, HttpUrl
 
 IngestionStatus = Literal["No Extraction", "Pending", "Successful", "Failed", "Expired"]
-EmbeddingStatus = Literal["Not Embedded", "Pending", "Embedded", "Failed"]
+EmbeddingStatus = Literal["Not Embedded", "Pending", "Embedded", "Failed", "Expired"]
+ScoredStatus = Literal["Not Scored", "Pending", "Scored", "Failed"]
 class ArticleBase(BaseModel):
     """Fields common to every article, before it has a database id."""
     url: HttpUrl
@@ -33,6 +34,11 @@ class ArticleBase(BaseModel):
     chunk_ids: List[str] = Field(default_factory=list)
     number_of_chunks: int = 0
     embedding_status: EmbeddingStatus = "Not Embedded"
+    # Populated by the relativity-scoring job (services/scorer.py, not yet
+    # written) — same protection pattern as the embedding fields above.
+    relativity_score: Optional[float] = None
+    scored_status: ScoredStatus = "Not Scored"
+    score_explanation: Optional[dict] = None
 
 class ArticleCreate(ArticleBase):
     """Shape the scraper builds before upserting into Mongo."""
@@ -74,4 +80,18 @@ class EmbeddingRunStatus(BaseModel):
     # the ETA reflects the current rate, not one dragged down forever by a
     # slow first article (e.g. one-time model/thread warmup on a fresh
     # container start).
+    avg_seconds_per_article: Optional[float] = None
+
+
+class ScoringRunStatus(BaseModel):
+    """The single `meta` document (_id: "scoring_status") tracking the
+    relativity-scoring job's state — identical shape to EmbeddingRunStatus,
+    same reasoning throughout (see that model's docstring/comments)."""
+    last_run_at: Optional[datetime] = None
+    last_run_status: Optional[Literal["success", "partial", "failed", "stopped"]] = None
+    in_progress: bool = False
+    total: int = 0
+    processed: int = 0
+    started_at: Optional[datetime] = None
+    stop_requested: bool = False
     avg_seconds_per_article: Optional[float] = None

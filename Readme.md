@@ -88,7 +88,6 @@ news-scraper-ymo/
 │   ├── components/                  # Overview bar (incl. embed/stop + progress), chart, article list
 │   ├── requirements.txt
 │   └── Dockerfile
-├── sync-db.sh / sync-db.ps1         # Dumps the running DB into backend/yazaki_news/ (bash / PowerShell)
 ├── docker-compose.yml               # incl. the one-shot mongo-restore sync service
 └── .gitignore
 ```
@@ -234,18 +233,7 @@ This starts Mongo, runs `mongo-restore` (dropping and replacing the local databa
 
 ### Closing the app (and syncing your changes out)
 
-Before shutting down — especially if you're about to continue on a different machine — dump the current database state into `backend/yazaki_news/` so it can be committed and pulled in elsewhere. Either run the helper script:
-
-```powershell
-# PowerShell
-.\sync-db.ps1
-```
-```bash
-# bash / Git Bash
-bash sync-db.sh
-```
-
-...or, if script execution is blocked (common on locked-down corporate machines), paste these commands directly into your terminal instead — typing/pasting isn't affected by script execution policy:
+Before shutting down — especially if you're about to continue on a different machine — dump the current database state into `backend/yazaki_news/` so it can be committed and pulled in elsewhere:
 
 ```powershell
 $container = docker compose ps -q mongo
@@ -254,6 +242,8 @@ Remove-Item -Recurse -Force backend\yazaki_news -ErrorAction SilentlyContinue
 docker cp "${container}:/tmp/sync-dump/yazaki_news" backend\yazaki_news
 docker compose exec -T mongo rm -rf /tmp/sync-dump
 ```
+
+> ⚠️ If this fails because `/tmp/sync-dump` already exists (left over from an earlier interrupted attempt), remove it first — `docker compose exec -T mongo rm -rf /tmp/sync-dump` — then run the dump command again.
 
 Then review and push:
 ```bash

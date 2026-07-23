@@ -1,10 +1,11 @@
 """
 Overview bar: today/month totals + top keywords, last scrape time, and the
-manual "Update", "Extract articles", and "Embed articles" buttons (the last
-one becomes "Stop embedding" while a run is in progress). Calls
-GET /stats/overview, POST /update, POST /articles/extract,
-POST /articles/embed, GET /articles/embed/status, and
-POST /articles/embed/stop via api_client — no direct HTTP calls here.
+manual "Update", "Extract articles", "Embed articles", and "Relativity
+scoring" buttons (the last two become "Stop embedding"/"Stop scoring"
+while their run is in progress). Calls GET /stats/overview, POST /update,
+POST /articles/extract, POST /articles/embed, GET /articles/embed/status,
+POST /articles/embed/stop, POST /articles/score, GET /articles/score/status,
+and POST /articles/score/stop via api_client — no direct HTTP calls here.
 """
 
 import streamlit as st
@@ -26,6 +27,10 @@ def render():
         _show_embedding_result(st.session_state.pop("embedding_result"))
     if "stop_embedding_result" in st.session_state:
         _show_stop_embedding_result(st.session_state.pop("stop_embedding_result"))
+    if "scoring_result" in st.session_state:
+        _show_scoring_result(st.session_state.pop("scoring_result"))
+    if "stop_scoring_result" in st.session_state:
+        _show_stop_scoring_result(st.session_state.pop("stop_scoring_result"))
 
     try:
         embedding_status = api_client.get_embedding_run_status()
@@ -33,7 +38,14 @@ def render():
         embedding_status = {"in_progress": False}
     embedding_running = embedding_status.get("in_progress", False)
 
+    try:
+        scoring_status = api_client.get_scoring_run_status()
+    except Exception:
+        scoring_status = {"in_progress": False}
+    scoring_running = scoring_status.get("in_progress", False)
+
     _show_embedding_progress(embedding_status)
+    _show_scoring_progress(scoring_status)
 
     try:
         overview = api_client.get_overview()
@@ -50,7 +62,7 @@ def render():
         col4.metric("Top keyword this month", overview["month_top_keyword"] or "—")
         col5.metric("Last updated", _format_last_scraped(overview.get("last_scraped")))
 
-    col_update, col_extract, col_embed = st.columns(3)
+    col_update, col_extract, col_embed, col_score = st.columns(4)
 
     if col_update.button("🔄 Update now"):
         with st.spinner("Fetching latest news — this may take a minute..."):
@@ -99,6 +111,30 @@ def render():
             }
         else:
             st.session_state["embedding_result"] = result
+        st.rerun()
+
+    if scoring_running:
+        if col_score.button("🛑 Stop scoring"):
+            try:
+                result = api_client.stop_scoring()
+            except Exception as e:
+                st.session_state["stop_scoring_result"] = {
+                    "status": "error",
+                    "message": f"Request to backend failed: {e}",
+                }
+            else:
+                st.session_state["stop_scoring_result"] = result
+            st.rerun()
+    elif col_score.button("🎯 Relativity scoring"):
+        try:
+            result = api_client.trigger_scoring()
+        except Exception as e:
+            st.session_state["scoring_result"] = {
+                "status": "error",
+                "message": f"Request to backend failed: {e}",
+            }
+        else:
+            st.session_state["scoring_result"] = result
         st.rerun()
 
 
@@ -154,6 +190,49 @@ def _show_stop_embedding_result(result: dict):
         st.warning(message)
     else:
         st.error(message)
+
+
+def _show_scoring_progress(status: dict):
+    """Shows a progress bar while a scoring run is in flight — mirrors
+    _show_embedding_progress() exactly."""
+    if not status.get("in_progress"):
+        return
+
+    total = status.get("total", 0)
+    processed = status.get("processed", 0)
+    fraction = (processed / total) if total else 0.0
+    percent = round(fraction * 100)
+
+    eta = status.get("estimated_minutes_remaining")
+    eta_text = f" — expected to finish in about {eta:g} min." if eta is not None else ""
+
+    st.progress(fraction)
+    st.info(f"Scoring in progress: {processed}/{total} articles ({percent}%).{eta_text} Reload to see progress.")
+
+
+def _show_scoring_result(result: dict):
+    status = result.get("status")
+    message = result.get("message", "")
+
+    if status == "started":
+        st.info(message)
+    elif status == "already_running":
+        st.warning(message)
+    else:
+        st.error(message)
+
+
+def _show_stop_scoring_result(result: dict):
+    status = result.get("status")
+    message = result.get("message", "")
+
+    if status == "stopping":
+        st.info(message)
+    elif status == "not_running":
+        st.warning(message)
+    else:
+        st.error(message)
+
 
 def _format_last_scraped(value):
     if not value:

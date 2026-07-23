@@ -90,6 +90,26 @@ def stop_embedding() -> dict:
     return _post("/articles/embed/stop")
 
 
+# ── Relativity scoring ──────────────────────────────────────────────────
+
+def trigger_scoring() -> dict:
+    """Starts a relativity-scoring run in the background — mirrors
+    trigger_embedding() exactly."""
+    return _post("/articles/score")
+
+
+def get_scoring_run_status() -> dict:
+    """Live progress for the scoring run currently in flight (or the last
+    one, if none is running) — {in_progress, total, processed}."""
+    return _get("/articles/score/status")
+
+
+def stop_scoring() -> dict:
+    """Requests that the current scoring run stop after its in-flight
+    article finishes."""
+    return _post("/articles/score/stop")
+
+
 # ── Articles ────────────────────────────────────────────────────────────
 
 def get_articles(
