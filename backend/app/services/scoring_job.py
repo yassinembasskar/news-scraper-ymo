@@ -65,6 +65,11 @@ def run_scoring() -> ScoringSummary:
     repository.set_scoring_started(now)
     repository.set_scoring_progress(total, 0)
 
+    # Fetched once for the whole run, not per article — a tree walk reads
+    # this for every chunk, and it only changes via feedback clicks, which
+    # don't happen mid-run.
+    threshold_overrides = repository.get_node_threshold_overrides()
+
     avg_seconds_per_article: Optional[float] = None
     last_checkpoint = time.monotonic()
 
@@ -77,8 +82,12 @@ def run_scoring() -> ScoringSummary:
 
         repository.set_article_scoring_status(article.id, "Pending")
         try:
-            score, explanation = score_article(article.chunk_ids)
-            repository.set_article_scoring_result(article.id, score, explanation, "Scored")
+            raw_score, explanation = score_article(article.chunk_ids, threshold_overrides=threshold_overrides)
+            # Re-applies any "more"/"less relative" feedback this article
+            # already accumulated (see routers/scoring.py) — a bulk run
+            # must not silently wipe out prior per-article adjustments.
+            final_score = min(100, max(0, raw_score + (article.relativity_score_adjustment or 0)))
+            repository.set_article_scoring_result(article.id, final_score, explanation, "Scored")
             scored_count += 1
         except Exception as e:
             repository.set_article_scoring_status(article.id, "Failed")

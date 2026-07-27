@@ -29,8 +29,13 @@ def _get(path: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOU
     return response.json()
 
 
-def _post(path: str, params: Optional[dict] = None, timeout: int = DEFAULT_TIMEOUT) -> dict:
-    response = requests.post(f"{settings.backend_api_url}{path}", params=params, timeout=timeout)
+def _post(
+    path: str,
+    params: Optional[dict] = None,
+    json: Optional[dict] = None,
+    timeout: int = DEFAULT_TIMEOUT,
+) -> dict:
+    response = requests.post(f"{settings.backend_api_url}{path}", params=params, json=json, timeout=timeout)
     response.raise_for_status()
     return response.json()
 
@@ -110,6 +115,28 @@ def stop_scoring() -> dict:
     return _post("/articles/score/stop")
 
 
+def submit_relativity_feedback(article_id: str, direction: str) -> dict:
+    """"More relative" / "less relative" feedback for one article —
+    direction is "more" or "less". Returns the updated
+    {relativity_score, score_explanation} after the immediate re-score."""
+    return _post(f"/articles/{article_id}/relativity-feedback", json={"direction": direction})
+
+
+def rescore_article(article_id: str) -> dict:
+    """Manually re-scores one already-scored article against the relevance
+    tree as it currently stands (e.g. after other articles' feedback has
+    shifted it), without submitting feedback or changing any threshold
+    itself. Returns the updated {relativity_score, score_explanation}."""
+    return _post(f"/articles/{article_id}/rescore")
+
+
+def get_tree_nodes() -> dict:
+    """The relevance tree's id/parent/depth/labels (no embeddings) — used
+    by the article detail page to resolve score_explanation's triggered
+    node_ids into readable labels and root paths."""
+    return _get("/tree/nodes")
+
+
 # ── Articles ────────────────────────────────────────────────────────────
 
 def get_articles(
@@ -132,6 +159,12 @@ def get_articles(
     if date_to:
         params["date_to"] = date_to
     return _get("/articles", params=params)
+
+
+def get_article(article_id: str) -> dict:
+    """Fetches one article's full shape — including content and
+    score_explanation — for the article detail page."""
+    return _get(f"/articles/{article_id}")
 
 
 def submit_manual_content(article_id: str, content: str) -> dict:

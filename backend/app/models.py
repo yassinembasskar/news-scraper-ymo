@@ -39,6 +39,16 @@ class ArticleBase(BaseModel):
     relativity_score: Optional[float] = None
     scored_status: ScoredStatus = "Not Scored"
     score_explanation: Optional[dict] = None
+    # Accumulated from "more"/"less relative" feedback clicks (see
+    # routers/scoring.py's submit_relativity_feedback) — added on top of
+    # the tree-computed raw score, clamped to [0, 100], every time this
+    # article is (re)scored. Separate from the tree-threshold nudges that
+    # same feedback also makes: those shape future/other articles'
+    # scoring but rarely move this article's own number (threshold
+    # changes don't affect a similarity value already well clear of the
+    # boundary), so this field is what guarantees a visible per-article
+    # change instead.
+    relativity_score_adjustment: int = 0
 
 class ArticleCreate(ArticleBase):
     """Shape the scraper builds before upserting into Mongo."""

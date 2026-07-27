@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py config.py api_client.py ./
 COPY components/ ./components/
+COPY views/ ./views/
 
 EXPOSE 8501
 

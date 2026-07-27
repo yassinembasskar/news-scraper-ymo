@@ -33,6 +33,13 @@ from app.database import articles, meta, db
 META_DOC_ID = "scrape_status"
 META_EMBEDDING_DOC_ID = "embedding_status"
 META_SCORING_DOC_ID = "scoring_status"
+# Per-node relevance-tree threshold overrides from "more"/"less relative"
+# feedback clicks (see services/scorer.py's get_active_thresholds /
+# compute_relativity_feedback_updates). A node with no document here uses
+# the static baseline threshold from yazaki_tree_id_map.json instead —
+# this collection only ever holds the deltas feedback has accumulated, not
+# a full copy of the tree.
+NODE_THRESHOLDS_COLLECTION = "node_threshold_overrides"
 # Must match services/embedder.py's PINECONE_INDEX_NAME — the embedding job
 # and this cleanup path have to agree on which index they're both touching.
 PINECONE_INDEX_NAME = "yazaki"
@@ -54,14 +61,15 @@ def upsert_article(article: ArticleCreate) -> bool:
 
     ingestion_status, content, the embedding fields (chunk_ids,
     number_of_chunks, embedding_status), and the scoring fields
-    (relativity_score, scored_status, score_explanation) are deliberately
-    excluded from the overwrite: they belong to the extraction/embedding/
-    scoring workflows, not to GNews data. An article re-fetched by a later
-    scrape (e.g. during a catch-up retry that re-covers a date range) must
-    never wipe out previously-extracted content, previously-embedded
-    chunks, previously-computed scores, or reset their statuses back to
-    their initial values — $setOnInsert only applies these on a genuinely
-    new document.
+    (relativity_score, scored_status, score_explanation,
+    relativity_score_adjustment) are deliberately excluded from the
+    overwrite: they belong to the extraction/embedding/scoring workflows,
+    not to GNews data. An article re-fetched by a later scrape (e.g.
+    during a catch-up retry that re-covers a date range) must never wipe
+    out previously-extracted content, previously-embedded chunks,
+    previously-computed scores, or reset their statuses back to their
+    initial values — $setOnInsert only applies these on a genuinely new
+    document.
     """
     data = article.model_dump()
     data["url"] = str(data["url"])  # HttpUrl -> plain string for storage
@@ -70,7 +78,7 @@ def upsert_article(article: ArticleCreate) -> bool:
         key: data.pop(key)
         for key in (
             "ingestion_status", "content", "chunk_ids", "number_of_chunks", "embedding_status",
-            "relativity_score", "scored_status", "score_explanation",
+            "relativity_score", "scored_status", "score_explanation", "relativity_score_adjustment",
         )
     }
 
@@ -308,6 +316,26 @@ def reset_pending_scoring_articles() -> int:
     return result.modified_count
 
 
+def get_node_threshold_overrides() -> dict:
+    """All accumulated relativity-feedback threshold overrides —
+    {node_id: threshold}. Fetched once per scoring run (or once per
+    relativity-feedback click) rather than per node/chunk, since a tree
+    walk touches this for every chunk of every article."""
+    return {doc["_id"]: doc["threshold"] for doc in db[NODE_THRESHOLDS_COLLECTION].find({})}
+
+
+def set_node_threshold_overrides(updates: dict) -> None:
+    """Upserts {node_id: threshold} from one relativity-feedback click —
+    typically a handful of documents (however many nodes that article's
+    scoring run triggered)."""
+    for node_id, threshold in updates.items():
+        db[NODE_THRESHOLDS_COLLECTION].update_one(
+            {"_id": node_id},
+            {"$set": {"threshold": threshold}},
+            upsert=True,
+        )
+
+
 def set_scoring_rate(avg_seconds_per_article: float) -> None:
     """Updates the exponential moving average of seconds-per-article on the
     scoring-status document — see set_embedding_rate()."""
@@ -532,6 +560,18 @@ def set_article_scoring_result(article_id: str, score: int, explanation: dict, s
             "score_explanation": explanation,
             "scored_status": status,
         }},
+    )
+
+
+def set_article_score_adjustment(article_id: str, adjustment: int) -> None:
+    """Updates just a "more"/"less relative" feedback's accumulated direct
+    score adjustment for one article, without touching relativity_score/
+    score_explanation/scored_status — the caller re-scores separately
+    (via set_article_scoring_result) using this new value. Same
+    embedding_status: "Embedded" guard as set_article_scoring_result()."""
+    articles.update_one(
+        {"_id": ObjectId(article_id), "embedding_status": "Embedded"},
+        {"$set": {"relativity_score_adjustment": adjustment}},
     )
 
 

@@ -1,15 +1,14 @@
 """
 Streamlit entrypoint.
 
-Lays out the page and orchestrates the three dashboard sections. Each
-component owns its own rendering and session-state usage; this file just
-sequences them.
+Thin router only — actual page content lives in views/dashboard.py and
+views/article_detail.py. Uses st.navigation with position="hidden" rather
+than Streamlit's automatic pages/ directory discovery, so no sidebar
+page-switcher is shown; the only way to reach the detail view is
+programmatically, via the "See more" button in components/article_list.py.
 """
 
 import streamlit as st
-
-from config import settings
-from components import article_list, chart_view, overview_bar
 
 st.set_page_config(
     page_title="Yazaki News Monitor",
@@ -17,10 +16,8 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("📰 Yazaki News Monitor")
-
-overview_bar.render()
-st.divider()
-chart_view.render()
-st.divider()
-article_list.render()
+pages = [
+    st.Page("views/dashboard.py", title="Dashboard", default=True),
+    st.Page("views/article_detail.py", title="Article detail"),
+]
+st.navigation(pages, position="hidden").run()

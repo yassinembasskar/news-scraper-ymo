@@ -51,6 +51,15 @@ def render():
         st.write("No articles match this filter.")
         return
 
+    # Highest relativity_score first; articles with no score yet (None)
+    # sort after every scored one, but keep their relative order among
+    # themselves (Python's sort is stable) so the list doesn't visibly
+    # reshuffle before any scoring has happened.
+    articles = sorted(
+        articles,
+        key=lambda a: (a.get("relativity_score") is None, -(a.get("relativity_score") or 0)),
+    )
+
     try:
         embedding_running = api_client.get_embedding_run_status().get("in_progress", False)
     except Exception:
@@ -85,22 +94,91 @@ def render():
         if scoring_running and scored_status == "Not Scored" and embedding_status == "Embedded":
             scored_status = "Pending"
 
-        scoring_line = f"Scoring: {scored_status}"
-        if scored_status == "Scored" and relativity_score is not None:
-            scoring_line += f" ({relativity_score})"
+        scoring_line = f"Scoring: {_relativity_display(scored_status, relativity_score)}"
 
-        st.markdown(
-            f"**[{article['title']}]({article['url']})**  \n"
-            f"{lang_tag} · {published} · {source} · Extraction: {ingestion_status} · "
-            f"Embedding: {embedding_status} · {scoring_line}  \n"
-            f"Keywords: {keywords}"
-        )
+        col_main, col_feedback = st.columns([4, 3])
+
+        with col_main:
+            st.markdown(
+                f"**[{article['title']}]({article['url']})**  \n"
+                f"{lang_tag} · {published} · {source} · Extraction: {ingestion_status} · "
+                f"Embedding: {embedding_status} · {scoring_line}  \n"
+                f"Keywords: {keywords}"
+            )
+
+        with col_feedback:
+            if scored_status == "Scored":
+                _render_relativity_feedback(article)
+
+        if st.button("See more", key=f"see_more_{article['id']}"):
+            st.session_state["selected_article_id"] = article["id"]
+            st.switch_page("views/article_detail.py")
 
         if ingestion_status == "Failed":
             _render_retry_button(article)
             _render_manual_content_form(article)
 
         st.divider()
+
+
+# Bands match the calibration target in services/scorer.py's SCORE_POWER
+# comment (majority <60, ~30% in 60-79, ~10% >=80) — green only for the
+# genuinely high-relativity minority, not the typical article.
+RELATIVITY_HIGH_THRESHOLD = 80
+RELATIVITY_MEDIUM_THRESHOLD = 60
+
+
+def _relativity_display(scored_status: str, relativity_score) -> str:
+    """Colored markdown span for a scored article's relativity_score, or
+    the plain status (grayed out) while it isn't scored yet."""
+    if scored_status != "Scored" or relativity_score is None:
+        return f":gray[{scored_status}]"
+
+    if relativity_score >= RELATIVITY_HIGH_THRESHOLD:
+        color = "green"
+    elif relativity_score >= RELATIVITY_MEDIUM_THRESHOLD:
+        color = "orange"
+    else:
+        color = "red"
+    return f":{color}[**{relativity_score}**]"
+
+
+def _render_relativity_feedback(article: dict):
+    """"More relative" / "less relative" / "rescore" controls for a scored
+    article. The two feedback buttons each nudge the threshold of every
+    relevance-tree node this article's scoring run triggered (weighted by
+    how much of the article actually hit that node), persist that to the
+    shared tree (so it also shapes every future article's scoring, not
+    just this one), and re-score this article immediately. Rescore just
+    re-runs scoring against the tree as it currently stands — no feedback,
+    no threshold change — for when *other* articles' feedback has moved
+    the tree since this one was last scored."""
+    article_id = article["id"]
+    col_more, col_less, col_rescore = st.columns(3)
+
+    if col_more.button("👍 More", key=f"more_relative_{article_id}", help="This article is more relevant than its score suggests"):
+        try:
+            api_client.submit_relativity_feedback(article_id, "more")
+        except Exception as e:
+            st.error(f"Could not submit feedback: {e}")
+        else:
+            st.rerun()
+
+    if col_less.button("👎 Less", key=f"less_relative_{article_id}", help="This article is less relevant than its score suggests"):
+        try:
+            api_client.submit_relativity_feedback(article_id, "less")
+        except Exception as e:
+            st.error(f"Could not submit feedback: {e}")
+        else:
+            st.rerun()
+
+    if col_rescore.button("🔄 Rescore", key=f"rescore_{article_id}", help="Re-run scoring against the relevance tree as it stands now"):
+        try:
+            api_client.rescore_article(article_id)
+        except Exception as e:
+            st.error(f"Could not rescore: {e}")
+        else:
+            st.rerun()
 
 
 def _render_manual_content_form(article: dict):

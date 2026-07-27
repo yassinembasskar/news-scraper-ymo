@@ -76,6 +76,15 @@ DENSITY_BONUS_FRACTION_THRESHOLD = 0.5
 # data (backend/app/calibrate_scoring.py) behind these numbers.
 SCORE_POWER = 1.8
 
+# Human feedback ("more relative" / "less relative" buttons in the
+# frontend): the base per-click nudge to a triggered node's threshold,
+# scaled per-node by that node's share of the article's chunks (see
+# apply_relativity_feedback). Clamped so a run of feedback clicks can't
+# push a node to always-trigger (0.0) or never-trigger (1.0).
+FEEDBACK_STEP = 0.02
+FEEDBACK_THRESHOLD_MIN = 0.1
+FEEDBACK_THRESHOLD_MAX = 0.9
+
 
 @lru_cache(maxsize=1)
 def _load_tree() -> dict:
@@ -83,6 +92,67 @@ def _load_tree() -> dict:
     embeddings (per-language)/threshold. Cached — it's a static file."""
     with open(TREE_PATH, encoding="utf-8") as f:
         return json.load(f)
+
+
+def get_active_thresholds(overrides: Optional[dict] = None) -> dict:
+    """{node_id: effective_threshold} for every node — the static baseline
+    from yazaki_tree_id_map.json, with any relativity-feedback override
+    (from repository.get_node_threshold_overrides()) taking precedence.
+    Callers fetch overrides from Mongo (this module stays Mongo-free) and
+    pass them in here once per scoring run/re-score, not per node."""
+    tree = _load_tree()
+    overrides = overrides or {}
+    return {node_id: overrides.get(node_id, node["threshold"]) for node_id, node in tree.items()}
+
+
+def compute_relativity_feedback_updates(explanation: dict, direction: str, active_thresholds: dict) -> dict:
+    """Pure — no Mongo/file I/O. User feedback on one article's score:
+    computes a nudged threshold for every node that article's scoring run
+    triggered. direction="more" means the article is more relevant than
+    its score reflects, so triggered nodes should be *easier* to hit next
+    time -> threshold decreases. direction="less" does the opposite.
+
+    Each node's nudge is FEEDBACK_STEP scaled by that node's share of the
+    article's chunks (supporting_chunks / total_chunks) — a node most of
+    the article's content actually hit moves close to the full step, one
+    only a single stray chunk grazed barely moves.
+
+    active_thresholds is the current effective threshold per node (see
+    get_active_thresholds) — the baseline this nudge moves from. Returns
+    {node_id: new_threshold} for changed nodes only; caller persists via
+    repository.set_node_threshold_overrides()."""
+    sign = -1.0 if direction == "more" else 1.0
+    total_chunks = explanation.get("total_chunks") or 0
+    triggered_nodes = explanation.get("triggered_nodes") or []
+    updates: dict = {}
+    if total_chunks == 0:
+        return updates
+
+    for node in triggered_nodes:
+        node_id = node["node_id"]
+        if node_id not in active_thresholds:
+            continue
+        ratio = len(node.get("supporting_chunks", [])) / total_chunks
+        delta = sign * FEEDBACK_STEP * ratio
+        old_threshold = active_thresholds[node_id]
+        new_threshold = min(FEEDBACK_THRESHOLD_MAX, max(FEEDBACK_THRESHOLD_MIN, old_threshold + delta))
+        updates[node_id] = new_threshold
+
+    return updates
+
+
+@lru_cache(maxsize=1)
+def get_tree_nodes_for_display() -> dict:
+    """Same tree, stripped of the (large, write-only-for-scoring)
+    per-language embedding vectors — just id/parent/depth/labels. For
+    the frontend's article detail page to resolve a triggered node_id
+    into a readable label and walk its root path, without needing the
+    full multi-MB tree file or any numpy/similarity logic itself."""
+    tree = _load_tree()
+    return {
+        node_id: {"parent": node.get("parent"), "depth": node.get("depth"), "labels": node.get("labels")}
+        for node_id, node in tree.items()
+    }
 
 
 @lru_cache(maxsize=1)
@@ -113,6 +183,7 @@ def _walk(
     chunk_id: str,
     tree: dict,
     children_index: dict,
+    thresholds: dict,
     hits: list,
 ) -> bool:
     """Returns True if this node cleared its own threshold (so the caller
@@ -122,7 +193,7 @@ def _walk(
     node_embedding = np.asarray(node["embeddings"][chunk_language], dtype=np.float32)
     similarity = _cosine_similarity(chunk_vector, node_embedding)
 
-    if similarity < node["threshold"]:
+    if similarity < thresholds[node_id]:
         return False
 
     children = children_index.get(node_id, [])
@@ -132,7 +203,7 @@ def _walk(
 
     any_child_cleared = False
     for child_id in children:
-        if _walk(child_id, chunk_vector, chunk_language, chunk_id, tree, children_index, hits):
+        if _walk(child_id, chunk_vector, chunk_language, chunk_id, tree, children_index, thresholds, hits):
             any_child_cleared = True
 
     if not any_child_cleared:
@@ -173,13 +244,17 @@ def _empty_explanation(total_chunks: int) -> dict:
     }
 
 
-def score_article(chunk_ids: List[str]) -> Tuple[int, dict]:
+def score_article(chunk_ids: List[str], threshold_overrides: Optional[dict] = None) -> Tuple[int, dict]:
     """Scores one article's chunks against the relevance tree. Pure
-    function — no Mongo access, no writes. Returns (final_score,
-    explanation_dict); final_score is always an int 0-100 (an article
-    with zero tree matches scores 0, same as one with zero chunks)."""
+    function — no Mongo access, no writes; threshold_overrides (if any)
+    must be fetched by the caller via
+    repository.get_node_threshold_overrides() and passed in — see
+    get_active_thresholds(). Returns (final_score, explanation_dict);
+    final_score is always an int 0-100 (an article with zero tree matches
+    scores 0, same as one with zero chunks)."""
     tree = _load_tree()
     children_index = _build_children_index()
+    thresholds = get_active_thresholds(threshold_overrides)
     roots = [node_id for node_id, node in tree.items() if node.get("parent") is None]
 
     total_chunks = len(chunk_ids)
@@ -194,7 +269,7 @@ def score_article(chunk_ids: List[str]) -> Tuple[int, dict]:
         if chunk is None:
             continue
         for root_id in roots:
-            _walk(root_id, chunk["embedding"], chunk["language"], chunk_id, tree, children_index, all_hits)
+            _walk(root_id, chunk["embedding"], chunk["language"], chunk_id, tree, children_index, thresholds, all_hits)
 
     if not all_hits:
         return 0, _empty_explanation(total_chunks)

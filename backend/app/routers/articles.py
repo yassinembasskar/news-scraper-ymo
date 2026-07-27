@@ -39,6 +39,21 @@ def list_articles(
     )
 
 
+@router.get("/articles/{article_id}", response_model=ArticleOut)
+def get_article(article_id: str):
+    """Fetches one article by id — full shape, including content and
+    score_explanation, for the frontend's article detail page."""
+    try:
+        found = repository.get_articles_by_ids([article_id])
+    except InvalidId:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    if not found:
+        raise HTTPException(status_code=404, detail="Article not found")
+
+    return found[0]
+
+
 @router.put("/articles/{article_id}/content")
 def submit_manual_content(article_id: str, payload: ManualContentRequest):
     """Lets a user manually paste an article's content — typically after
