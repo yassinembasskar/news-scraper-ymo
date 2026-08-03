@@ -27,12 +27,13 @@ from pinecone import Pinecone
 
 from app.config import settings
 from app.database import articles, meta
-from app.models import ArticleCreate, ArticleOut, EmbeddingRunStatus, ScoringRunStatus, ScrapeStatus
+from app.models import ArticleCreate, ArticleOut, EmbeddingRunStatus, ExtractionRunStatus, ScoringRunStatus, ScrapeStatus
 from app.database import articles, meta, db
 
 META_DOC_ID = "scrape_status"
 META_EMBEDDING_DOC_ID = "embedding_status"
 META_SCORING_DOC_ID = "scoring_status"
+META_EXTRACTION_DOC_ID = "extraction_status"
 # Per-node relevance-tree threshold overrides from "more"/"less relative"
 # feedback clicks (see services/scorer.py's get_active_thresholds /
 # compute_relativity_feedback_updates). A node with no document here uses
@@ -434,6 +435,28 @@ def log_scoring_run(
     })
 
 
+def log_extraction_run(
+    status: str,
+    message: str,
+    expired_articles: int,
+    extracted_articles: int,
+    failed_articles: int,
+    errors: List[str],
+) -> None:
+    """Appends a permanent record of one extraction run to the
+    extraction_runs collection — the extraction-job counterpart to
+    log_embedding_run()/log_scoring_run()."""
+    db["extraction_runs"].insert_one({
+        "status": status,
+        "message": message,
+        "expired_articles": expired_articles,
+        "extracted_articles": extracted_articles,
+        "failed_articles": failed_articles,
+        "errors": errors,
+        "logged_at": datetime.now(timezone.utc),
+    })
+
+
 def get_articles_for_stats(
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
@@ -489,6 +512,122 @@ def reset_pending_extraction_articles() -> int:
         {"$set": {"ingestion_status": "No Extraction"}},
     )
     return result.modified_count
+
+
+def get_status_field_counts(field: str, query: Optional[dict] = None) -> dict:
+    """Returns {status_value: count} for the given article field (e.g.
+    "ingestion_status"), restricted to `query` if given. The raw counts
+    behind the overview bar's per-stage stats — one call per stage, each
+    with its own query scoping it to that stage's actual candidate pool."""
+    pipeline = []
+    if query:
+        pipeline.append({"$match": query})
+    pipeline.append({"$group": {"_id": f"${field}", "count": {"$sum": 1}}})
+    return {doc["_id"]: doc["count"] for doc in articles.aggregate(pipeline)}
+
+
+def get_running_pipeline_stage() -> Optional[str]:
+    """Returns which pipeline stage — 'extraction', 'embedding', or
+    'scoring' — currently has its in_progress flag set, or None if none
+    do. Used to enforce that only one stage runs at a time: extraction
+    (Playwright/Chromium), embedding (the sentence-transformer model), and
+    scoring (the tree-walk CPU work) are all CPU-heavy and each already
+    guards against overlapping with itself — this is the same guard
+    extended across stages, so a click on "Embed articles" while
+    extraction is still running waits instead of fighting it for CPU."""
+    for stage, doc_id in (
+        ("extraction", META_EXTRACTION_DOC_ID),
+        ("embedding", META_EMBEDDING_DOC_ID),
+        ("scoring", META_SCORING_DOC_ID),
+    ):
+        if meta.find_one({"_id": doc_id, "in_progress": True}):
+            return stage
+    return None
+
+
+def get_extraction_status() -> Optional[ExtractionRunStatus]:
+    """Returns the current extraction-job status, or None if the
+    extraction job has never run yet."""
+    doc = meta.find_one({"_id": META_EXTRACTION_DOC_ID})
+    if doc is None:
+        return None
+    doc = dict(doc)
+    doc.pop("_id")
+    return ExtractionRunStatus(**doc)
+
+
+def set_extraction_in_progress(value: bool) -> None:
+    """Flips just the in_progress flag on the extraction-status document —
+    Mongo-backed so it survives a process restart, same as
+    set_embedding_in_progress(). extractor.py's in-process threading.Lock
+    is still the hard guard against two Playwright/Chromium instances
+    racing in the same process; this flag is what the frontend polls for
+    progress and what a restart resets (see main.py's lifespan)."""
+    meta.update_one(
+        {"_id": META_EXTRACTION_DOC_ID},
+        {"$set": {"in_progress": value}},
+        upsert=True,
+    )
+
+
+def set_extraction_progress(total: int, processed: int) -> None:
+    """Updates the live progress counters on the extraction-status document
+    — called once at the start of a run (processed=0) and again after each
+    article finishes, so the frontend can poll and show "X/Y done"."""
+    meta.update_one(
+        {"_id": META_EXTRACTION_DOC_ID},
+        {"$set": {"total": total, "processed": processed}},
+        upsert=True,
+    )
+
+
+def set_extraction_stop_requested(value: bool) -> None:
+    """Flips the stop_requested flag — set True by the stop endpoint, read
+    by the run loop between articles, reset back to False once a run
+    actually stops (whether via the flag or finishing naturally). An
+    article the loop never reaches after a stop stays at whatever status
+    it already had ("No Extraction" for one never touched this run) — it
+    is never marked "Failed" just because the run stopped before reaching
+    it."""
+    meta.update_one(
+        {"_id": META_EXTRACTION_DOC_ID},
+        {"$set": {"stop_requested": value}},
+        upsert=True,
+    )
+
+
+def set_extraction_rate(avg_seconds_per_article: float) -> None:
+    """Updates the exponential moving average of seconds-per-article on the
+    extraction-status document — see EmbeddingRunStatus.avg_seconds_per_article
+    for why this is recency-weighted rather than a plain run-long average."""
+    meta.update_one(
+        {"_id": META_EXTRACTION_DOC_ID},
+        {"$set": {"avg_seconds_per_article": avg_seconds_per_article}},
+        upsert=True,
+    )
+
+
+def set_extraction_started(started_at: datetime) -> None:
+    """Records when the current run began — used to estimate time
+    remaining once progress starts coming in. Called once, right before
+    the per-article loop starts."""
+    meta.update_one(
+        {"_id": META_EXTRACTION_DOC_ID},
+        {"$set": {"started_at": started_at}},
+        upsert=True,
+    )
+
+
+def set_extraction_run_outcome(last_run_at: datetime, last_run_status: str) -> None:
+    """Records the outcome of the most recent extraction run without
+    touching in_progress — kept separate from set_extraction_in_progress()
+    so the two can be called at different points in the job without either
+    clobbering the other."""
+    meta.update_one(
+        {"_id": META_EXTRACTION_DOC_ID},
+        {"$set": {"last_run_at": last_run_at, "last_run_status": last_run_status}},
+        upsert=True,
+    )
 
 
 def set_ingestion_status_bulk(article_ids: List[str], status: str) -> None:

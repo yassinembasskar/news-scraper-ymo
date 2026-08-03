@@ -20,7 +20,7 @@ router = APIRouter()
 
 
 class ScoringTriggerResponse(BaseModel):
-    status: str  # "started" | "already_running" | "stopping" | "not_running"
+    status: str  # "started" | "already_running" | "skipped" | "stopping" | "not_running"
     message: str
 
 
@@ -35,11 +35,33 @@ class ScoringStatusResponse(BaseModel):
 def trigger_scoring(background_tasks: BackgroundTasks):
     """Starts a scoring run in the background. Safe to call repeatedly —
     if one's already running, this reports that instead of starting a
-    second overlapping run."""
+    second overlapping run. If there's nothing pending scoring right now,
+    this says so immediately instead of spinning up a background job just
+    to discover the same thing a moment later — that "nothing to do"
+    outcome is reported here and nowhere else; it never touches
+    last_run_at/last_run_status, which keep reflecting the most recent run
+    that actually did something."""
     if scoring_job.is_scoring_running():
         return ScoringTriggerResponse(
             status="already_running",
             message="A scoring run is already in progress. Reload in a bit to check progress.",
+        )
+
+    other_stage = repository.get_running_pipeline_stage()
+    if other_stage:
+        return ScoringTriggerResponse(
+            status="already_running",
+            message=(
+                f"A {other_stage} run is currently in progress — extraction, "
+                "embedding, and scoring don't run at the same time (they'd "
+                "fight each other for CPU). Try again once it finishes."
+            ),
+        )
+
+    if not repository.get_articles_pending_scoring():
+        return ScoringTriggerResponse(
+            status="skipped",
+            message="All articles are already scored — nothing left to score.",
         )
 
     background_tasks.add_task(scoring_job.run_scoring_job)

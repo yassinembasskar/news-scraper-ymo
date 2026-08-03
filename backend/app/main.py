@@ -27,12 +27,17 @@ async def lifespan(app: FastAPI):
     database.init_indexes()
 
     # Neither the extraction lock (in-process, so already gone) nor the
-    # embedding in_progress flag (Mongo-backed, survives a restart) can be
-    # trusted to reflect reality if this process was killed outright rather
-    # than shut down cleanly — their finally blocks wouldn't have run. Reset
-    # both job guards and any article stuck at "Pending" from either job so
-    # nothing is left permanently stuck or permanently unrunnable.
+    # embedding/scoring in_progress flags (Mongo-backed, survive a restart)
+    # can be trusted to reflect reality if this process was killed outright
+    # rather than shut down cleanly — their finally blocks wouldn't have
+    # run. Reset every job guard and any article stuck at "Pending" from
+    # any job so nothing is left permanently stuck or permanently
+    # unrunnable — and, for extraction/embedding/scoring alike, an article
+    # a run never reached or didn't finish falls back to its pre-run
+    # status rather than ending up mislabeled "Failed".
     repository.reset_pending_extraction_articles()
+    repository.set_extraction_in_progress(False)
+    repository.set_extraction_stop_requested(False)
     repository.reset_pending_embedding_articles()
     repository.set_embedding_in_progress(False)
     repository.set_embedding_stop_requested(False)

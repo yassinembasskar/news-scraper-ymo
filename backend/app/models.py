@@ -105,3 +105,22 @@ class ScoringRunStatus(BaseModel):
     started_at: Optional[datetime] = None
     stop_requested: bool = False
     avg_seconds_per_article: Optional[float] = None
+
+
+class ExtractionRunStatus(BaseModel):
+    """The single `meta` document (_id: "extraction_status") tracking the
+    extraction job's state — identical shape to EmbeddingRunStatus/
+    ScoringRunStatus, same reasoning throughout (see EmbeddingRunStatus's
+    docstring/comments). Layered on top of (not replacing) extractor.py's
+    in-process threading.Lock, which remains the hard guard against two
+    Playwright/Chromium instances running in the same process — this
+    document exists so progress/ETA can be polled and a run can be stopped
+    cooperatively, the same way embedding/scoring already work."""
+    last_run_at: Optional[datetime] = None
+    last_run_status: Optional[Literal["success", "partial", "failed", "stopped", "skipped"]] = None
+    in_progress: bool = False
+    total: int = 0
+    processed: int = 0
+    started_at: Optional[datetime] = None
+    stop_requested: bool = False
+    avg_seconds_per_article: Optional[float] = None

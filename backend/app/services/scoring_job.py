@@ -47,16 +47,16 @@ def run_scoring() -> ScoringSummary:
     candidates = repository.get_articles_pending_scoring()
 
     if not candidates:
-        summary = ScoringSummary(status="skipped", message="No articles pending scoring.")
-        repository.set_scoring_run_outcome(now, summary.status)
-        repository.log_scoring_run(
-            status=summary.status,
-            message=summary.message,
-            scored_articles=0,
-            failed_articles=0,
-            errors=[],
+        # Nothing was actually run — no article touched — so this must not
+        # overwrite last_run_at/last_run_status (that stays showing the
+        # most recent run that actually did something) or get an entry in
+        # scoring_runs. The caller (trigger_scoring()) already checks for
+        # this same "nothing pending" case up front and responds
+        # immediately, so in practice this branch is only a rare fallback.
+        return ScoringSummary(
+            status="skipped",
+            message="All articles are already scored — nothing left to score.",
         )
-        return summary
 
     total = len(candidates)
     scored_count = 0
@@ -159,6 +159,12 @@ def run_scoring_job() -> None:
     stuck at "Pending" in a finally block — whether the run succeeded,
     partially failed, was stopped, or raised."""
     if is_scoring_running():
+        return
+    # Re-checked here (not just in the router) to close the race where two
+    # trigger requests for different stages land close enough together
+    # that both pass the router's check before either flag is actually
+    # set — see repository.get_running_pipeline_stage().
+    if repository.get_running_pipeline_stage():
         return
 
     repository.set_scoring_in_progress(True)

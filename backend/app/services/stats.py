@@ -92,6 +92,58 @@ def get_bucket_summary(date_from: datetime, date_to: datetime) -> dict:
     return _summarize(raw)
 
 
+# ── Pipeline stage stats (overview bar, under each button) ─────────────
+
+def get_pipeline_stats() -> dict:
+    """Per-stage status breakdowns shown under the "Extract articles",
+    "Embed articles", and "Relativity scoring" buttons. Each stage's
+    denominator is its own actual candidate pool, not the whole
+    collection — extraction is counted over every article, embedding over
+    articles that were actually successfully extracted (the only ones
+    ever eligible, per get_articles_pending_embedding()'s
+    ingestion_status == "Successful" filter), and scoring over articles
+    that were actually embedded (same reasoning, embedding_status ==
+    "Embedded")."""
+    extraction_counts = repository.get_status_field_counts("ingestion_status")
+    total_articles = sum(extraction_counts.values())
+
+    embedding_counts = repository.get_status_field_counts(
+        "embedding_status", {"ingestion_status": "Successful"}
+    )
+    successful_extractions = extraction_counts.get("Successful", 0)
+
+    scoring_counts = repository.get_status_field_counts(
+        "scored_status", {"embedding_status": "Embedded"}
+    )
+    embedded_total = embedding_counts.get("Embedded", 0)
+
+    return {
+        "extraction": {
+            "total": total_articles,
+            "successful": extraction_counts.get("Successful", 0),
+            "failed": extraction_counts.get("Failed", 0),
+            "expired": extraction_counts.get("Expired", 0),
+            "not_extracted": extraction_counts.get("No Extraction", 0),
+            "pending": extraction_counts.get("Pending", 0),
+        },
+        "embedding": {
+            "total": successful_extractions,
+            "embedded": embedding_counts.get("Embedded", 0),
+            "not_embedded": embedding_counts.get("Not Embedded", 0),
+            "failed": embedding_counts.get("Failed", 0),
+            "expired": embedding_counts.get("Expired", 0),
+            "pending": embedding_counts.get("Pending", 0),
+        },
+        "scoring": {
+            "total": embedded_total,
+            "scored": scoring_counts.get("Scored", 0),
+            "not_scored": scoring_counts.get("Not Scored", 0),
+            "failed": scoring_counts.get("Failed", 0),
+            "pending": scoring_counts.get("Pending", 0),
+        },
+    }
+
+
 # ── Overview (top summary bar) ──────────────────────────────────────────
 
 def get_overview() -> dict:

@@ -104,16 +104,17 @@ def run_embedding() -> EmbeddingSummary:
     candidates = repository.get_articles_pending_embedding()
 
     if not candidates:
-        summary = EmbeddingSummary(status="skipped", message="No articles pending embedding.")
-        repository.set_embedding_run_outcome(now, summary.status)
-        repository.log_embedding_run(
-            status=summary.status,
-            message=summary.message,
-            embedded_articles=0,
-            failed_articles=0,
-            errors=[],
+        # Nothing was actually run — no model loaded, no article touched —
+        # so this must not overwrite last_run_at/last_run_status (that
+        # stays showing the most recent run that actually did something)
+        # or get an entry in embedding_runs. The caller
+        # (trigger_embedding()) already checks for this same "nothing
+        # pending" case up front and responds immediately, so in practice
+        # this branch is only a rare fallback.
+        return EmbeddingSummary(
+            status="skipped",
+            message="All articles are already embedded — nothing left to embed.",
         )
-        return summary
 
     model = SentenceTransformer(EMBEDDING_MODEL_NAME)
     pc = Pinecone(api_key=settings.pinecone_api_key)
@@ -218,6 +219,12 @@ def run_embedding_job() -> None:
     is only visible by reloading the article list and checking each
     article's embedding_status; the final summary is logged server-side."""
     if is_embedding_running():
+        return
+    # Re-checked here (not just in the router) to close the race where two
+    # trigger requests for different stages land close enough together
+    # that both pass the router's check before either flag is actually
+    # set — see repository.get_running_pipeline_stage().
+    if repository.get_running_pipeline_stage():
         return
 
     repository.set_embedding_in_progress(True)

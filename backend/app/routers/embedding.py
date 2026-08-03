@@ -23,7 +23,7 @@ router = APIRouter()
 
 
 class EmbeddingTriggerResponse(BaseModel):
-    status: str  # "started" | "already_running"
+    status: str  # "started" | "already_running" | "skipped" | "stopping" | "not_running"
     message: str
 
 
@@ -38,11 +38,33 @@ class EmbeddingStatusResponse(BaseModel):
 def trigger_embedding(background_tasks: BackgroundTasks):
     """Starts an embedding run in the background. Safe to call
     repeatedly — if one's already running, this reports that instead of
-    starting a second overlapping run."""
+    starting a second overlapping run. If there's nothing pending
+    embedding right now, this says so immediately instead of spinning up a
+    background job (and loading the model) just to discover the same
+    thing a moment later — that "nothing to do" outcome is reported here
+    and nowhere else; it never touches last_run_at/last_run_status, which
+    keep reflecting the most recent run that actually did something."""
     if embedder.is_embedding_running():
         return EmbeddingTriggerResponse(
             status="already_running",
             message="An embedding run is already in progress. Reload in a bit to check progress.",
+        )
+
+    other_stage = repository.get_running_pipeline_stage()
+    if other_stage:
+        return EmbeddingTriggerResponse(
+            status="already_running",
+            message=(
+                f"A {other_stage} run is currently in progress — extraction, "
+                "embedding, and scoring don't run at the same time (they'd "
+                "fight each other for CPU). Try again once it finishes."
+            ),
+        )
+
+    if not repository.get_articles_pending_embedding():
+        return EmbeddingTriggerResponse(
+            status="skipped",
+            message="All articles are already embedded — nothing left to embed.",
         )
 
     background_tasks.add_task(embedder.run_embedding_job)

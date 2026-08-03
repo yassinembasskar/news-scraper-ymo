@@ -68,16 +68,34 @@ def get_scrape_status() -> dict:
 
 def trigger_extraction() -> dict:
     """Starts an extraction run in the background and returns almost
-    immediately. Progress is visible by reloading the page — articles show
-    'Pending' while being processed, then settle into 'Successful'/'Failed'."""
+    immediately — unless there's nothing pending extraction, in which case
+    the backend reports that immediately instead ({"status": "skipped"}).
+    Progress is visible by reloading the page — articles show 'Pending'
+    while being processed, then settle into 'Successful'/'Failed' — or by
+    polling get_extraction_run_status()."""
     return _post("/articles/extract")
+
+
+def get_extraction_run_status() -> dict:
+    """Live progress for the extraction run currently in flight (or the
+    last one, if none is running) — {in_progress, total, processed},
+    mirrors get_embedding_run_status()/get_scoring_run_status()."""
+    return _get("/articles/extract/status")
+
+
+def stop_extraction() -> dict:
+    """Requests that the current extraction run stop after its in-flight
+    article finishes. Not instant — see the backend endpoint's docstring."""
+    return _post("/articles/extract/stop")
 
 
 # ── Embedding ───────────────────────────────────────────────────────────
 
 def trigger_embedding() -> dict:
     """Starts an embedding run in the background and returns almost
-    immediately. Progress is visible by reloading the page — articles show
+    immediately — unless there's nothing pending embedding, in which case
+    the backend reports that immediately instead ({"status": "skipped"}).
+    Progress is visible by reloading the page — articles show
     embedding_status 'Not Embedded' while pending, then settle into
     'Embedded'/'Failed'."""
     return _post("/articles/embed")
@@ -99,7 +117,8 @@ def stop_embedding() -> dict:
 
 def trigger_scoring() -> dict:
     """Starts a relativity-scoring run in the background — mirrors
-    trigger_embedding() exactly."""
+    trigger_embedding() exactly, including the immediate {"status":
+    "skipped"} response when nothing is pending scoring."""
     return _post("/articles/score")
 
 
@@ -180,6 +199,13 @@ def retry_article_extraction(article_id: str) -> dict:
 
 def get_overview() -> dict:
     return _get("/stats/overview")
+
+
+def get_pipeline_stats() -> dict:
+    """Per-stage status breakdowns (extraction/embedding/scoring) shown
+    under each pipeline button in the overview bar — {extraction: {...},
+    embedding: {...}, scoring: {...}}."""
+    return _get("/stats/pipeline")
 
 
 def get_day_chart(iso_date: str) -> dict:

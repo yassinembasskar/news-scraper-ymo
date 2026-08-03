@@ -51,11 +51,50 @@ class BucketSummaryResponse(BaseModel):
     language_counts: Dict[str, int]
 
 
+class ExtractionStageStats(BaseModel):
+    total: int
+    successful: int
+    failed: int
+    expired: int
+    not_extracted: int
+    pending: int
+
+
+class EmbeddingStageStats(BaseModel):
+    total: int  # successful extractions — embedding's actual candidate pool
+    embedded: int
+    not_embedded: int
+    failed: int
+    expired: int
+    pending: int
+
+
+class ScoringStageStats(BaseModel):
+    total: int  # embedded articles — scoring's actual candidate pool
+    scored: int
+    not_scored: int
+    failed: int
+    pending: int
+
+
+class PipelineStatsResponse(BaseModel):
+    extraction: ExtractionStageStats
+    embedding: EmbeddingStageStats
+    scoring: ScoringStageStats
+
+
 @router.get("/overview", response_model=OverviewResponse)
 def overview():
     """Today's total + top keyword, this month's total + top keyword (both
     in Morocco local time), plus the last successful scrape watermark."""
     return stats.get_overview()
+
+
+@router.get("/pipeline", response_model=PipelineStatsResponse)
+def pipeline_stats():
+    """Per-stage status breakdowns (extraction/embedding/scoring) shown
+    under each pipeline button in the overview bar."""
+    return stats.get_pipeline_stats()
 
 
 @router.get("/chart/day", response_model=ChartResponse)
