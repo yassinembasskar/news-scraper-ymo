@@ -31,6 +31,7 @@ Workflow, every time it's triggered:
   4. Log     -> one embedding_runs document for the whole run.
 """
 
+import concurrent.futures
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -55,6 +56,20 @@ UPSERT_BATCH_SIZE = 100
 # seconds-per-article moving average — higher reacts faster to changes in
 # speed, at the cost of more jitter in the reported ETA.
 RATE_EMA_ALPHA = 0.3
+# An article with more raw content than this is skipped (marked "Failed")
+# rather than chunked/embedded — a circuit breaker on top of
+# chunking.py's per-chunk length cap, for whatever chunk_text() still
+# turns into an unreasonably large number of chunks for one article.
+MAX_ARTICLE_CONTENT_CHARS = 50_000
+# An article whose chunking+encoding+upsert takes longer than this is
+# abandoned and marked "Failed" rather than letting it block every article
+# behind it in the run indefinitely. The abandoned worker thread keeps
+# running to completion in the background (Python can't force-kill a
+# thread) — its result is simply discarded, and if it does eventually
+# finish and upsert into Pinecone, those vectors are just orphaned rather
+# than harmful, since this article's Mongo document won't reference them
+# and will be retried (overwriting them) on the next embedding run.
+EMBEDDING_TIMEOUT_SECONDS = 300
 
 
 @dataclass
@@ -71,7 +86,13 @@ def _embed_one_article(model, index, article) -> List[str]:
     chunk ids that were upserted. Raises on any failure — the caller is
     responsible for catching this per-article so one bad article doesn't
     abort the whole run."""
-    chunks = chunk_text(article.id, article.language, article.content or "")
+    content = article.content or ""
+    if len(content) > MAX_ARTICLE_CONTENT_CHARS:
+        raise ValueError(
+            f"Content too long ({len(content)} chars > {MAX_ARTICLE_CONTENT_CHARS} cap) — skipped"
+        )
+
+    chunks = chunk_text(article.id, article.language, content)
     if not chunks:
         raise ValueError("No chunks produced from content")
 
@@ -97,6 +118,24 @@ def _embed_one_article(model, index, article) -> List[str]:
         index.upsert(vectors=vectors[i : i + UPSERT_BATCH_SIZE])
 
     return [vector["id"] for vector in vectors]
+
+
+def _embed_one_article_with_timeout(model, index, article) -> List[str]:
+    """Runs _embed_one_article() on a worker thread and gives up after
+    EMBEDDING_TIMEOUT_SECONDS, raising TimeoutError instead of blocking
+    the whole run on one slow article. Uses a fresh single-use executor
+    (not a shared pool) and shutdown(wait=False) on timeout so the
+    abandoned thread is left to finish on its own time without this call
+    blocking on it — see EMBEDDING_TIMEOUT_SECONDS' docstring for what
+    that means for the abandoned work."""
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(_embed_one_article, model, index, article)
+    try:
+        return future.result(timeout=EMBEDDING_TIMEOUT_SECONDS)
+    except concurrent.futures.TimeoutError:
+        raise TimeoutError(f"Embedding exceeded the {EMBEDDING_TIMEOUT_SECONDS}s timeout")
+    finally:
+        executor.shutdown(wait=False)
 
 
 def run_embedding() -> EmbeddingSummary:
@@ -139,7 +178,7 @@ def run_embedding() -> EmbeddingSummary:
 
         repository.set_article_embedding_status(article.id, "Pending")
         try:
-            chunk_ids = _embed_one_article(model, index, article)
+            chunk_ids = _embed_one_article_with_timeout(model, index, article)
             repository.set_article_embedding_result(article.id, chunk_ids, "Embedded")
             embedded_count += 1
         except Exception as e:
