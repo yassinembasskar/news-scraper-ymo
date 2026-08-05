@@ -1,4 +1,16 @@
 streamlit==1.59.0
+# Pinned: streamlit 1.59.0 only declares starlette>=0.40.0 with no upper
+# bound, but its own vendored GZip middleware wrapper
+# (starlette_gzip_middleware.py) hasn't kept up with starlette 1.4.0's
+# GZipResponder API (which added a required thread_minimum_size kwarg) —
+# an unpinned starlette resolves to that and crashes every request with
+# "TypeError: GZipResponder.__init__() missing 1 required keyword-only
+# argument: 'thread_minimum_size'". Anything below 0.47.0 fails a
+# different way (ImportError: cannot import name
+# 'DEFAULT_EXCLUDED_CONTENT_TYPES', which streamlit's wrapper also needs) —
+# 1.3.1 is the newest release that has that constant and predates the
+# breaking thread_minimum_size requirement.
+starlette==1.3.1
 requests==2.34.2
 pydantic-settings==2.14.2
 python-dotenv==1.2.2
