@@ -30,3 +30,17 @@ backend/corp-certs
 
 # Docker
 docker-compose.override.yml
+
+# LLM Insight stage's Ollama model cache — machine-local, ~4.7GB binary,
+# self-bootstraps via `docker compose up` (see docker-compose.yml's `ollama`
+# service). Never committed, unlike the mongodump snapshot which is.
+llm_model/
+
+# Local scratch / ad-hoc test artifacts — not part of the app.
+qwen_test_output.log
+test_qwen_embedding.py
+backend/extracted_articles/
+backend/llm_insight_test_results/
+
+# Project report — generated locally, kept out of version control.
+PROJECT_REPORT.md

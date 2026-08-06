@@ -11,6 +11,8 @@ from components import article_list, chart_view, overview_bar
 
 st.title("📰 Yazaki News Monitor")
 
+st.page_link("views/reports.py", label="📄 Daily Insight Reports →")
+
 overview_bar.render()
 st.divider()
 chart_view.render()

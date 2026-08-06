@@ -156,6 +156,41 @@ def get_tree_nodes() -> dict:
     return _get("/tree/nodes")
 
 
+# ── Daily LLM Insight reports ───────────────────────────────────────────
+
+def get_report_calendar(year: int, month: int) -> dict:
+    """Per-day markers for one month — {days: [{report_date, relevant_count,
+    articles_processed}, ...]}. Only days that have a generated report
+    appear; the calendar treats any absent day as not-yet-generated."""
+    return _get("/reports/calendar", params={"year": year, "month": month})
+
+
+def get_daily_report(report_date: str) -> dict:
+    """One day's report ("YYYY-MM-DD"). `generated` is False when the day
+    was never run; True with insights == [] means run-but-nothing-relevant."""
+    return _get(f"/reports/{report_date}")
+
+
+def generate_daily_report(report_date: str) -> dict:
+    """Kicks off background generation for one day. Returns almost
+    immediately with {"status": ...} — the actual work runs server-side and
+    is polled via get_report_generate_status()."""
+    return _post(f"/reports/{report_date}/generate")
+
+
+def get_report_generate_status() -> dict:
+    """Live progress of the report run currently in flight (or the last
+    one) — {in_progress, report_date, total, processed,
+    estimated_minutes_remaining}."""
+    return _get("/reports/generate/status")
+
+
+def stop_report_generation() -> dict:
+    """Requests that the current report run stop after its in-flight article
+    finishes. Whatever was found so far is still saved."""
+    return _post("/reports/generate/stop")
+
+
 # ── Articles ────────────────────────────────────────────────────────────
 
 def get_articles(

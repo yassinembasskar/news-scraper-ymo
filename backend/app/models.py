@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, HttpUrl
 IngestionStatus = Literal["No Extraction", "Pending", "Successful", "Failed", "Expired"]
 EmbeddingStatus = Literal["Not Embedded", "Pending", "Embedded", "Failed", "Expired"]
 ScoredStatus = Literal["Not Scored", "Pending", "Scored", "Failed"]
+TranslationStatus = Literal["Not Translated", "Translated", "Failed"]
 class ArticleBase(BaseModel):
     """Fields common to every article, before it has a database id."""
     url: HttpUrl
@@ -49,6 +50,17 @@ class ArticleBase(BaseModel):
     # boundary), so this field is what guarantees a visible per-article
     # change instead.
     relativity_score_adjustment: int = 0
+    # Populated on demand by the LLM Insight / report stage
+    # (services/report_job.py), the first time a non-English article is
+    # assessed: the article is translated to English once, cached here, and
+    # reused on every later report run instead of being re-translated.
+    # Same scraper/upsert protection pattern as the fields above. English
+    # articles are never translated and keep "Not Translated" (nothing reads
+    # it for them). translated_content is the full English block
+    # ("Title: ...\n\n<body>") fed straight to the LLM assessment.
+    translated_title: Optional[str] = None
+    translated_content: Optional[str] = None
+    translation_status: TranslationStatus = "Not Translated"
 
 class ArticleCreate(ArticleBase):
     """Shape the scraper builds before upserting into Mongo."""
@@ -124,3 +136,48 @@ class ExtractionRunStatus(BaseModel):
     started_at: Optional[datetime] = None
     stop_requested: bool = False
     avg_seconds_per_article: Optional[float] = None
+
+
+class ReportRunStatus(BaseModel):
+    """The single `meta` document (_id: "report_status") tracking the LLM
+    Insight / daily-report generation job — same shape and same reasoning
+    as ScoringRunStatus, plus `report_date`: which calendar day (UTC,
+    "YYYY-MM-DD") the in-progress (or most recent) run is generating, so the
+    frontend polling a specific day's generation knows whether the running
+    job is the one it triggered. total/processed count that day's candidate
+    articles, one LLM assessment each."""
+    last_run_at: Optional[datetime] = None
+    last_run_status: Optional[Literal["success", "partial", "failed", "stopped", "skipped"]] = None
+    in_progress: bool = False
+    total: int = 0
+    processed: int = 0
+    started_at: Optional[datetime] = None
+    stop_requested: bool = False
+    avg_seconds_per_article: Optional[float] = None
+    report_date: Optional[str] = None
+
+
+class ReportInsight(BaseModel):
+    """One relevant-insight card in a daily report — the LLM's structured
+    assessment of a single article, plus which article it came from so the
+    frontend card can link back to it."""
+    article_id: str
+    source_title: str
+    title: str
+    confidence: int
+    concerned_param: str
+    effect: Literal["positive", "negative", "neutral"]
+    recommended_action: str
+
+
+class DailyReport(BaseModel):
+    """One generated daily report, stored in the `daily_reports` collection
+    keyed by report_date ("YYYY-MM-DD", UTC). The presence of a document is
+    itself the "this day has been processed" signal the calendar reads;
+    insights == [] is a valid, fully-processed outcome (nothing relevant
+    that day), distinct from no document at all (never generated)."""
+    report_date: str
+    generated_at: datetime
+    articles_processed: int
+    relevant_count: int
+    insights: List[ReportInsight] = Field(default_factory=list)

@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import database, repository
-from app.routers import articles, embedding, extraction, scoring, stats, update
+from app.routers import articles, embedding, extraction, reports, scoring, stats, update
 
 
 @asynccontextmanager
@@ -44,6 +44,11 @@ async def lifespan(app: FastAPI):
     repository.reset_pending_scoring_articles()
     repository.set_scoring_in_progress(False)
     repository.set_scoring_stop_requested(False)
+    # Report generation has no per-article "Pending" state to reset (it
+    # writes one daily_reports document at the end, not per-article fields),
+    # so only the Mongo-backed job guard needs clearing after a hard crash.
+    repository.set_report_in_progress(False)
+    repository.set_report_stop_requested(False)
 
     yield
     # No explicit shutdown cleanup needed — MongoClient closes its
@@ -61,6 +66,7 @@ app.include_router(stats.router)
 app.include_router(extraction.router)
 app.include_router(embedding.router)
 app.include_router(scoring.router)
+app.include_router(reports.router)
 
 
 @app.get("/health")

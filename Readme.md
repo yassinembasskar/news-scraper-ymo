@@ -1,6 +1,6 @@
 # 📰 Yazaki Morocco — News & Supply Chain Monitor
 
-An automated news intelligence dashboard that continuously tracks what's being said — in **English, French, and Arabic** — about Yazaki, its OEM customers, its competitors, and the global shipping routes and ports its supply chain depends on. Beyond the dashboard, it also builds a **semantic index** of everything it collects and **automatically scores how relevant each article actually is** to Yazaki's business against a hand-built relevance tree — turning the article archive into something that can be searched, ranked, and reasoned over by meaning, not just keyword.
+An automated news intelligence dashboard that continuously tracks what's being said — in **English, French, and Arabic** — about Yazaki, its OEM customers, its competitors, and the global shipping routes and ports its supply chain depends on. Beyond the dashboard, it also builds a **semantic index** of everything it collects and **automatically scores how relevant each article actually is** to Yazaki's business against a hand-built relevance tree — turning the article archive into something that can be searched, ranked, and reasoned over by meaning, not just keyword. Finally, a **local LLM (Qwen2.5-7B via Ollama)** turns each day's most relevant articles into a **daily insight report** — a short, structured assessment of which concrete SAP supply-chain parameter each event affects, in which direction, and what to do about it.
 
 ---
 
@@ -36,6 +36,7 @@ Yazaki Morocco doesn't operate in isolation. Its business is directly exposed to
 8. **Scores every embedded article for relevance** — click "Relativity scoring" and each article's chunk embeddings are walked through a hand-built relevance tree (automotive industry → OEMs, competitors, ports, logistics, etc.) to produce a 0–100 relativity score, plus a full explanation of exactly which tree nodes it matched and why.
 9. **Learns from feedback** — "👍 More" / "👎 Less" buttons on any scored article let a human correct the score directly, while also nudging the underlying tree's sensitivity so future articles benefit from the correction too.
 10. **Lets you drill into any article** — "See more" opens a detail page with the full scraped text and a visual breakdown of every relevance-tree node it triggered.
+11. **Generates daily insight reports with a local LLM** — a **Reports** calendar page where you can generate, for any day, an LLM assessment of that day's most-relevant articles: each genuinely operational event becomes a structured card (the affected **SAP parameter**, whether the effect is positive/negative/neutral, a confidence %, and a concrete recommended action), while off-topic articles are silently dropped. Non-English articles are **translated to English first** (and the translation is cached), because the model judges relevance far more reliably in English.
 
 ---
 
@@ -50,20 +51,25 @@ flowchart LR
     Pinecone -->|chunk vectors back| Scorer["Relativity scorer\n(relevance tree walk)"]
     Tree[("yazaki_tree_id_map.json\n+ Mongo threshold overrides")] --> Scorer
     Scorer -->|score + explanation| Mongo
+    Mongo -->|day's top-scored articles| Reporter["LLM Insight reporter\n(translate + assess)"]
+    Reporter <-->|prompt / JSON| Ollama[("Ollama\nQwen2.5-7B")]
+    Reporter -->|daily insight report| Mongo
     Frontend["Streamlit Dashboard"] -->|HTTP requests| Backend
     User(("User")) -->|views, clicks, feedback| Frontend
 ```
 
 | Layer | Technology | Role |
 |---|---|---|
-| Database | MongoDB | Stores articles, scrape/extraction/embedding/scoring status + history, and relativity-feedback threshold overrides |
-| Backend | FastAPI (Python) | Scrapes GNews, matches keywords, extracts article content, chunks + embeds content, scores relevance, exposes a REST API |
-| Frontend | Streamlit (Python) | Interactive dashboard — charts, filters, ranked/color-coded article list, extraction + embedding + scoring controls, per-article detail page |
+| Database | MongoDB | Stores articles, scrape/extraction/embedding/scoring status + history, relativity-feedback threshold overrides, cached translations, and generated daily reports |
+| Backend | FastAPI (Python) | Scrapes GNews, matches keywords, extracts article content, chunks + embeds content, scores relevance, generates daily LLM reports, exposes a REST API |
+| Frontend | Streamlit (Python) | Interactive dashboard — charts, filters, ranked/color-coded article list, extraction + embedding + scoring controls, per-article detail page, and a daily-report calendar |
 | Data source | [GNews API](https://gnews.io) | News search, title/description matching |
 | Content extraction | Playwright + trafilatura | Loads each article in a headless browser and pulls out its main text |
 | Embedding model | [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) via `sentence-transformers` | Turns article-text chunks into 1024-dimensional vectors, CPU inference, no LangChain |
 | Vector store | [Pinecone](https://www.pinecone.io) | Stores and indexes chunk embeddings (index name: `yazaki`, cosine metric); also the source the scorer reads chunk vectors back from |
 | Relevance tree | `backend/app/yazaki_tree_id_map.json` | A hand-built taxonomy of ~130 nodes (Automotive Industry → OEMs → specific manufacturers, ports, logistics, etc.), each with a per-language embedding and a similarity threshold |
+| Insight LLM | [Qwen2.5-7B-Instruct](https://ollama.com/library/qwen2.5) (`q4_K_M`) via [Ollama](https://ollama.com) | Translates non-English articles and produces the structured daily insight assessments; runs in its own container, CPU inference, model auto-downloaded on first start into a local cache |
+| Business logic | `backend/app/llm_insight_business_logic.md` + `llm_insight_sap_attributes.md` | Human-authored rules fed to the LLM — how to judge supply-chain relevance and the strict list of valid SAP parameters it may cite |
 | Orchestration | Docker Compose | Runs all services together with one command; database sync between machines is a separate, explicit opt-in step (see [Syncing the database](#syncing-the-database-between-machines)) |
 
 ---
@@ -77,14 +83,16 @@ news-scraper-ymo/
 │   │   ├── main.py                  # FastAPI entrypoint (incl. startup guard/state cleanup for all jobs)
 │   │   ├── config.py                # Environment settings
 │   │   ├── database.py              # MongoDB connection + indexes
-│   │   ├── models.py                # Data schemas (statuses, run-status docs, scoring fields)
+│   │   ├── models.py                # Data schemas (statuses, run-status docs, scoring/translation/report fields)
 │   │   ├── repository.py            # All MongoDB (and Pinecone-cleanup) queries
 │   │   ├── keywords.py              # Multilingual keyword configuration
 │   │   ├── yazaki_tree_id_map.json  # The relevance tree — ids, labels (en/fr/ar), per-language embeddings, thresholds
 │   │   ├── embed_tree_labels.py     # One-off script that (re)computes the tree's embeddings
-│   │   ├── routers/                 # API endpoints (articles, extraction, embedding, scoring, stats, update)
-│   │   └── services/                # GNews client, keyword matching, scraping, stats,
-│   │                                 # extraction, chunking, embedding, relativity scoring
+│   │   ├── llm_insight_business_logic.md   # LLM rules: how to judge supply-chain relevance + fill the report JSON
+│   │   ├── llm_insight_sap_attributes.md   # The strict list of SAP parameters the LLM may cite
+│   │   ├── routers/                 # API endpoints (articles, extraction, embedding, scoring, reports, stats, update)
+│   │   └── services/                # GNews client, keyword matching, scraping, stats, extraction,
+│   │                                 # chunking, embedding, relativity scoring, LLM insight + report job
 │   ├── extracted_articles/          # .txt output of successful extractions (not in a Docker volume)
 │   ├── yazaki_news/                 # mongodump snapshot checked into git — see "Syncing the database"
 │   ├── test_extraction.py           # Standalone Playwright/trafilatura proof-of-concept script
@@ -95,12 +103,14 @@ news-scraper-ymo/
 │   ├── app.py                       # Streamlit entrypoint — thin router (st.navigation, no visible page nav)
 │   ├── config.py                    # Environment settings
 │   ├── api_client.py                # All backend API calls
-│   ├── views/                       # dashboard.py (main page) and article_detail.py ("See more" page)
+│   ├── views/                       # dashboard.py (main page), article_detail.py ("See more" page),
+│   │                                 # reports.py (daily-report calendar)
 │   ├── components/                  # Overview bar (update/extract/embed/score controls + progress),
 │   │                                 # chart, article list (ranking, colored scores, feedback buttons)
 │   ├── requirements.txt
 │   └── Dockerfile
-├── docker-compose.yml               # incl. the opt-in ("sync" profile) mongo-restore service
+├── docker-compose.yml               # incl. the ollama service + the opt-in ("sync" profile) mongo-restore service
+├── llm_model/                       # Ollama model cache — machine-local, git-ignored, auto-populated on first run
 └── .gitignore
 ```
 
@@ -144,7 +154,7 @@ news-scraper-ymo/
    ```bash
    docker compose up --build
    ```
-   First run will take a few minutes (downloading images, installing dependencies). It starts with whatever's already in the `mongo` volume — see [Syncing the database](#syncing-the-database-between-machines) if you want to load the committed snapshot instead. Subsequent runs are fast — see [Common operations](#common-operations) below.
+   First run will take a few minutes (downloading images, installing dependencies). The **`ollama` service also downloads the insight model** (`qwen2.5:7b-instruct-q4_K_M`, ~4.7 GB) into a local `llm_model/` cache the first time — this happens automatically in the background and only once per machine; the model server reports healthy once it's finished. It starts with whatever's already in the `mongo` volume — see [Syncing the database](#syncing-the-database-between-machines) if you want to load the committed snapshot instead. Subsequent runs are fast — see [Common operations](#common-operations) below.
 
 5. **Open the dashboard:**
    ```
@@ -161,6 +171,7 @@ news-scraper-ymo/
 - **Click any bar** — the panel below updates to show that period's total, top keyword, per-language breakdown, and the actual list of articles, **ranked by relativity score** (highest first; not-yet-scored articles sort to the end).
 - **Keyword filter** — narrows the article list only; it never changes the chart or the summary numbers above it.
 - **Each article's row** shows its title/link, language, publish date, source, extraction/embedding/scoring status, matched keywords, a color-coded relativity score, feedback buttons, and a "See more" link to its detail page.
+- **"📄 Daily Insight Reports"** (link at the top of the dashboard) opens the report calendar — generate and browse per-day LLM insight briefs (see [Daily insight reports](#daily-insight-reports-local-llm)).
 
 ---
 
@@ -263,6 +274,55 @@ Click **"See more"** on any article to open a dedicated page (no visible page-sw
 
 ---
 
+## Daily insight reports (local LLM)
+
+Relativity scoring answers *"is this article on-topic?"*. The report stage answers a sharper question: *"does this describe a concrete event that affects a specific supply-chain parameter, and if so, what should we do about it?"* — and writes the answer as a short, structured daily brief. It runs a **local** LLM (Qwen2.5-7B-Instruct via [Ollama](https://ollama.com), quantized `q4_K_M`, ~5.5 GB to run, CPU-only) in its own container — no data leaves the machine, no external LLM API.
+
+### The Reports calendar
+
+A dedicated **"📄 Daily Insight Reports"** page (linked from the dashboard) shows a month calendar. Each day is marked:
+
+| Marker | Meaning |
+|---|---|
+| `· N` | Not generated yet — the day has **N** candidate articles (scored ≥ 60, not expired) awaiting a report |
+| 🔴 `N` | Generated — the report found **N** relevant insights |
+| ✅ | Generated — ran successfully but found nothing operationally relevant that day |
+| *(plain number)* | No candidate articles and no report |
+
+Clicking a day shows its insight cards, a *"no relevant insights for this day"* message (if it was generated empty), or a **Generate report** button (if it hasn't been run). A day can be regenerated at any time.
+
+### How a report is generated
+
+**Generation is a background job** — a busy day (dozens of articles, each a separate LLM pass on CPU) can take many minutes, so clicking **Generate** kicks off the run and the page shows a live progress bar + ETA + stop button, exactly like the embedding/scoring jobs. It also shares the same **single-stage-at-a-time guard**: report generation never runs concurrently with extraction/embedding/scoring (they'd fight for CPU), and its guard flag resets on backend startup after a crash.
+
+For the chosen day, the job:
+
+1. **Gathers candidates** — every article published that (UTC) day with `relativity_score ≥ 60` that isn't `Expired` (an expired article's content has been purged, so it can't be assessed and is excluded — it counts as 0 on the calendar).
+2. **Translates non-English articles to English first**, and **caches the translation** on the article (`translated_title` / `translated_content`, `translation_status`). This matters: testing showed the model reliably judges relevance in English but silently misses the *same clearly-relevant event* when it's in Arabic. Caching means each non-English article is translated only once, ever — every later report run reuses the stored English instead of paying the translation call again.
+3. **Assesses each article one at a time** against the business-logic rules (batching multiple articles into one prompt was found to make the model lazily skip reasoning). Output is constrained to a strict JSON schema, so every relevant result is a clean object:
+   ```json
+   {
+     "title": "Houthi group announces maritime blockade against Saudi Arabia",
+     "confidence": 90,
+     "concerned_param": "EORD-FLIFN",
+     "effect": "negative",
+     "recommended_action": "Block this route in the source list and reroute sourcing — this is a closure, not a delay."
+   }
+   ```
+   Off-topic articles (a car-model launch, a competitor's award) return nothing and simply don't appear in the report.
+4. **Stores one report document** per day in the `daily_reports` collection (keyed by date). An empty report is a real, distinct result ("processed, nothing relevant") — not the same as a day that was never generated.
+
+### The business logic (human-authored)
+
+Two Markdown files, fed to the model alongside each article, are the editable "brain" of this stage — no code change needed to tune its judgment:
+
+- **`backend/app/llm_insight_business_logic.md`** — how to decide relevance, how to classify a disruption (Port Congestion / Total Blockade / Capacity Change), how to reason about SAP impact (including the MRP backward-scheduling logic), how to set `confidence`, and worked examples. `concerned_param` stays a single field even for dual-impact events (e.g. a blockade *threat* that's between a delay and a closure); the `recommended_action` sentence carries the nuance a single field can't.
+- **`backend/app/llm_insight_sap_attributes.md`** — the strict, authoritative list of SAP parameters the model is allowed to cite (e.g. `MARC-PLIFZ` planned delivery time, `MARC-EISBE` safety stock, `EORD-FLIFN` source-list block, plus outbound `VBEP`/`LIKP`/`VBAK`). Anything not on this list is off-limits — an event with no matching parameter comes back "not relevant" rather than being force-fit onto the wrong field.
+
+Edit these two files to change what the reports flag and how — extend the SAP list, add few-shot examples, refine the classification rules.
+
+---
+
 ## Configuration
 
 **Keywords** — edit `backend/app/keywords.py` to add or remove search terms. Each language (`en`, `fr`, `ar`) has its own list, since company names need to be transliterated (not just translated) to actually match Arabic-language headlines — e.g. Renault appears as "رينو", not "Renault".
@@ -282,13 +342,19 @@ Click **"See more"** on any article to open a dedicated page (no visible page-sw
 - `FEEDBACK_SCORE_STEP` (default `5`, in `routers/scoring.py`) — the direct per-click score adjustment.
 - Per-node thresholds live in `yazaki_tree_id_map.json` itself (baseline, default `0.4` for every node) — re-run `embed_tree_labels.py` if you ever change the tree's structure or labels.
 
+**LLM insight reports:**
+- **Model** — `OLLAMA_MODEL` (default `qwen2.5:7b-instruct-q4_K_M`) in `backend/app/config.py`; must match the model the `ollama` service pulls in `docker-compose.yml`. `OLLAMA_HOST` points the backend at the Ollama container. The model choice is a deliberate fit for the target hardware (no GPU, ~16 GB RAM shared across the whole stack) — larger models risk swap-thrashing.
+- **Candidate threshold** — `MIN_RELATIVITY_SCORE` (default `60`) in `backend/app/services/report_job.py` decides which of a day's scored articles get assessed.
+- **Judgment / rules** — the two `llm_insight_*.md` files (see [Daily insight reports](#daily-insight-reports-local-llm)); no code change needed to retune.
+- **Decoding** — `num_ctx` (`8192`) and `temperature` (`0.2`) in `backend/app/services/llm_insight.py`. The context override is required: Ollama's 4096 default silently truncates a real article + the business-logic prompt, and the low temperature keeps the structured field choices stable.
+
 ---
 
 ## Syncing the database between machines
 
 The database isn't a Docker named volume shared across machines — it's local to whichever machine's Docker Desktop is running it. To carry your data (scraped articles, extraction/embedding/scoring progress) from one machine to another, the project uses a **git-committed MongoDB dump**:
 
-- `backend/yazaki_news/` is a `mongodump` snapshot of every collection (`articles`, `meta`, `scrape_runs`, `embedding_runs`, `scoring_runs`, `node_threshold_overrides`), checked into the repo.
+- `backend/yazaki_news/` is a `mongodump` snapshot of every collection (`articles`, `meta`, `scrape_runs`, `extraction_runs`, `embedding_runs`, `scoring_runs`, `node_threshold_overrides`, `daily_reports`), checked into the repo.
 - The `mongo-restore` service in `docker-compose.yml` restores this snapshot into the `mongo` container's database — but it is **opt-in**, behind Compose's `sync` profile. A plain `docker compose up` (with or without `--build`) never touches it.
 
 > This used to run automatically on every `docker compose up`, silently dropping and overwriting the live database on any unrelated rebuild/restart — that turned out to be actively dangerous (it once wiped out an in-progress scoring run). It's opt-in now specifically to prevent that.
@@ -370,5 +436,9 @@ docker compose down -v
 - **The scoring calibration is heuristic, not learned** — `SCORE_POWER` and the bonus weights in `scorer.py` were hand-tuned against a sample of real articles to hit a target score *distribution*, not trained against labeled ground truth. The feedback buttons let you correct individual articles and nudge the tree over time, but there's no formal retraining loop.
 - **Relativity feedback is global, not per-user** — a threshold override from one person's "more"/"less" click affects every future article for everyone, since there's no per-user or per-session scoping. On a shared deployment, conflicting feedback from different people will fight each other.
 - **No search/query endpoint yet** — the embedding pipeline populates Pinecone and the scorer reads from it, but there's currently no API or UI feature to directly query the vector index (semantic search, related-article lookup, RAG-style Q&A) outside of the relevance-tree walk.
+- **Daily reports don't deduplicate yet** — the same event covered by several outlets produces several near-identical cards (a real day once yielded 8 separate cards for a single Red Sea blockade story). Merging duplicate stories into one insight is the obvious next step, not yet built.
+- **Report generation is slow and CPU-bound** — a 7B model on CPU runs at roughly one article per ~30–60 seconds (translation, when needed, adds a call), so a busy day's report can take 30+ minutes. It's designed as an occasional, once-a-day background job, not something to run interactively; while it runs it holds the single-stage guard, blocking embedding/scoring/extraction.
+- **LLM judgment quality is capped by the 7B model** — it's the practical ceiling for CPU + ~16 GB RAM. If a report's calls look weak, the first lever is refining the two `llm_insight_*.md` files, not a bigger model. The `confidence` % is the model's own estimate and is **not** calibrated — treat it as a rough hint, not a probability.
+- **Report day boundaries are UTC**, while the dashboard's charts bucket by Morocco local time — an article published near midnight can land on a different "day" in the report calendar than in the dashboard chart.
 - **Corporate SSL inspection can block outbound HTTPS from inside Docker** on some networks (observed against both `gnews.io` and `huggingface.co`) — this is why the embedding model is seeded via a persistent volume rather than downloaded at build/run time. If you hit `SSLError: self-signed certificate in certificate chain`, this is almost certainly why; resolving it requires either the corporate proxy's CA certificate or an SSL-inspection bypass for the relevant domains from your IT department.
 - **`mongo-restore` is drop-and-replace only** — see [Syncing the database between machines](#syncing-the-database-between-machines). There is no merge option, and since it's opt-in you're responsible for remembering to dump + commit before switching machines.

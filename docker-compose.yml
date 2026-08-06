@@ -35,6 +35,69 @@ services:
     command: mongorestore --uri="mongodb://mongo:27017" --drop --db=yazaki_news /dump/yazaki_news
     restart: "no"
 
+  # LLM Insight stage's model server. Standalone for now — nothing depends on
+  # it yet, deliberately: backend doesn't call it until the Stage 5 client
+  # function exists, so it isn't wired into backend's depends_on/environment
+  # here, to avoid making every `docker compose up` wait on a 4.7GB pull for
+  # a stage that doesn't exist yet. That wiring is added when backend
+  # actually starts talking to it.
+  ollama:
+    image: ollama/ollama:latest
+    # No `container_name:` — left to Compose's auto-generated, project-scoped
+    # naming, same as `mongo`, `backend`, and `frontend` below. A fixed name
+    # here would collide if this compose file is ever run from two locations
+    # at once (a git worktree, a second clone for testing a branch), since
+    # Docker container names must be unique on the host. Dropping it doesn't
+    # affect service-name DNS resolution (`http://ollama:11434`) — Compose's
+    # internal DNS resolves by *service name* (the `ollama:` key), not
+    # container_name.
+    restart: unless-stopped
+    volumes:
+      - ./llm_model:/root/.ollama
+      # Corporate SSL-inspection proxy re-signs all outbound HTTPS with an
+      # internal CA this image doesn't trust by default — confirmed via
+      # `x509: certificate signed by unknown authority` pulling from
+      # registry.ollama.ai. Same root cause the backend's Dockerfile already
+      # documents for huggingface.co. Ollama is a Go binary, which honors
+      # SSL_CERT_FILE directly (see environment below) — no image rebuild
+      # needed, just point it at the existing corporate bundle.
+      - ./backend/corp-certs/yazaki-bundle.pem:/etc/ssl/certs/yazaki-bundle.pem:ro
+    environment:
+      - SSL_CERT_FILE=/etc/ssl/certs/yazaki-bundle.pem
+    # No `ports:` block — only `backend` will ever need to reach this, via
+    # Compose's internal DNS (http://ollama:11434). Publishing a host port
+    # here would expose an unauthenticated raw inference endpoint to the
+    # whole LAN, letting anyone bypass the app and burn the one CPU this
+    # runs on with arbitrary prompts. If host-only debugging access is ever
+    # needed, bind it explicitly rather than to all interfaces:
+    #   ports:
+    #     - "127.0.0.1:11434:11434"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        # `curl` isn't in this image (confirmed by testing — the earlier
+        # curl-based wait failed silently, every iteration, forever, and the
+        # pull below never ran). `ollama list` uses the same `ollama` binary
+        # already guaranteed present, no extra dependency needed.
+        until ollama list >/dev/null 2>&1; do sleep 1; done
+        for i in $(seq 1 20); do
+          ollama pull qwen2.5:7b-instruct-q4_K_M && break
+          echo "pull attempt $$i failed, retrying in 15s..."
+          sleep 15
+        done
+        wait
+    healthcheck:
+      # Checks the model is actually present, not just that the server
+      # answers — /api/tags returns success as soon as `ollama serve`
+      # starts, which happens well before a multi-GB `ollama pull` finishes
+      # on a fresh machine.
+      test: ["CMD-SHELL", "ollama list | grep -q qwen2.5"]
+      interval: 10s
+      timeout: 5s
+      retries: 180 # ~30 min budget: covers a slow first-time download + retries
+      start_period: 30s
+
   backend:
     build:
       context: ./backend
@@ -49,6 +112,9 @@ services:
       # network, services reach each other by service name, not localhost —
       # "mongo" here resolves to the mongo container automatically.
       - MONGO_URI=mongodb://mongo:27017
+      # LLM Insight stage (daily report generation) talks to the ollama
+      # service by its Compose service name. Same reasoning as MONGO_URI.
+      - OLLAMA_HOST=http://ollama:11434
     volumes:
       # Persistent home for the HuggingFace model cache, independent of any
       # single container/image (see backend/Dockerfile for why it's not
@@ -58,6 +124,8 @@ services:
       - hf-model-cache:/root/.cache/huggingface
     depends_on:
       mongo:
+        condition: service_healthy
+      ollama:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]

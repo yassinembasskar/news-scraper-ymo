@@ -19,5 +19,6 @@ st.set_page_config(
 pages = [
     st.Page("views/dashboard.py", title="Dashboard", default=True),
     st.Page("views/article_detail.py", title="Article detail"),
+    st.Page("views/reports.py", title="Reports"),
 ]
 st.navigation(pages, position="hidden").run()

@@ -14,7 +14,7 @@ while stale vectors linger in Pinecone, or vice versa).
 """
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional
 
@@ -27,13 +27,27 @@ from pinecone import Pinecone
 
 from app.config import settings
 from app.database import articles, meta
-from app.models import ArticleCreate, ArticleOut, EmbeddingRunStatus, ExtractionRunStatus, ScoringRunStatus, ScrapeStatus
+from app.models import (
+    ArticleCreate,
+    ArticleOut,
+    DailyReport,
+    EmbeddingRunStatus,
+    ExtractionRunStatus,
+    ReportRunStatus,
+    ScoringRunStatus,
+    ScrapeStatus,
+)
 from app.database import articles, meta, db
 
 META_DOC_ID = "scrape_status"
 META_EMBEDDING_DOC_ID = "embedding_status"
 META_SCORING_DOC_ID = "scoring_status"
 META_EXTRACTION_DOC_ID = "extraction_status"
+META_REPORT_DOC_ID = "report_status"
+# One document per generated day, _id == report_date ("YYYY-MM-DD", UTC).
+# Presence of a document is the "this day was processed" signal the calendar
+# reads; see models.DailyReport.
+DAILY_REPORTS_COLLECTION = "daily_reports"
 # Per-node relevance-tree threshold overrides from "more"/"less relative"
 # feedback clicks (see services/scorer.py's get_active_thresholds /
 # compute_relativity_feedback_updates). A node with no document here uses
@@ -61,16 +75,17 @@ def upsert_article(article: ArticleCreate) -> bool:
     an existing one.
 
     ingestion_status, content, the embedding fields (chunk_ids,
-    number_of_chunks, embedding_status), and the scoring fields
+    number_of_chunks, embedding_status), the scoring fields
     (relativity_score, scored_status, score_explanation,
-    relativity_score_adjustment) are deliberately excluded from the
-    overwrite: they belong to the extraction/embedding/scoring workflows,
-    not to GNews data. An article re-fetched by a later scrape (e.g.
-    during a catch-up retry that re-covers a date range) must never wipe
-    out previously-extracted content, previously-embedded chunks,
-    previously-computed scores, or reset their statuses back to their
-    initial values — $setOnInsert only applies these on a genuinely new
-    document.
+    relativity_score_adjustment), and the translation fields
+    (translated_title, translated_content, translation_status) are
+    deliberately excluded from the overwrite: they belong to the
+    extraction/embedding/scoring/translation workflows, not to GNews data.
+    An article re-fetched by a later scrape (e.g. during a catch-up retry
+    that re-covers a date range) must never wipe out previously-extracted
+    content, previously-embedded chunks, previously-computed scores, a
+    cached translation, or reset their statuses back to their initial
+    values — $setOnInsert only applies these on a genuinely new document.
     """
     data = article.model_dump()
     data["url"] = str(data["url"])  # HttpUrl -> plain string for storage
@@ -80,6 +95,7 @@ def upsert_article(article: ArticleCreate) -> bool:
         for key in (
             "ingestion_status", "content", "chunk_ids", "number_of_chunks", "embedding_status",
             "relativity_score", "scored_status", "score_explanation", "relativity_score_adjustment",
+            "translated_title", "translated_content", "translation_status",
         )
     }
 
@@ -366,6 +382,189 @@ def set_scoring_run_outcome(last_run_at: datetime, last_run_status: str) -> None
     )
 
 
+# ── LLM Insight / daily-report generation job status ────────────────────
+# All mirror the scoring-status helpers above one-for-one, on the
+# report_status meta document. The only extra field is report_date (which
+# day the current/last run is for) — see set_report_date().
+
+def get_report_status() -> Optional[ReportRunStatus]:
+    """Returns the current report-generation-job status, or None if it has
+    never run yet."""
+    doc = meta.find_one({"_id": META_REPORT_DOC_ID})
+    if doc is None:
+        return None
+    doc = dict(doc)
+    doc.pop("_id")
+    return ReportRunStatus(**doc)
+
+
+def set_report_in_progress(value: bool) -> None:
+    """Flips just the in_progress flag on the report-status document — same
+    Mongo-backed overlap guard as the other stages."""
+    meta.update_one(
+        {"_id": META_REPORT_DOC_ID},
+        {"$set": {"in_progress": value}},
+        upsert=True,
+    )
+
+
+def set_report_progress(total: int, processed: int) -> None:
+    """Updates the live progress counters on the report-status document."""
+    meta.update_one(
+        {"_id": META_REPORT_DOC_ID},
+        {"$set": {"total": total, "processed": processed}},
+        upsert=True,
+    )
+
+
+def set_report_stop_requested(value: bool) -> None:
+    """Flips the stop_requested flag — same cooperative-stop pattern as the
+    other stages."""
+    meta.update_one(
+        {"_id": META_REPORT_DOC_ID},
+        {"$set": {"stop_requested": value}},
+        upsert=True,
+    )
+
+
+def set_report_rate(avg_seconds_per_article: float) -> None:
+    """Updates the EMA of seconds-per-article on the report-status document."""
+    meta.update_one(
+        {"_id": META_REPORT_DOC_ID},
+        {"$set": {"avg_seconds_per_article": avg_seconds_per_article}},
+        upsert=True,
+    )
+
+
+def set_report_started(started_at: datetime, report_date: str) -> None:
+    """Records when the current report run began and which day it's for."""
+    meta.update_one(
+        {"_id": META_REPORT_DOC_ID},
+        {"$set": {"started_at": started_at, "report_date": report_date}},
+        upsert=True,
+    )
+
+
+def set_report_run_outcome(last_run_at: datetime, last_run_status: str) -> None:
+    """Records the outcome of the most recent report run without touching
+    in_progress."""
+    meta.update_one(
+        {"_id": META_REPORT_DOC_ID},
+        {"$set": {"last_run_at": last_run_at, "last_run_status": last_run_status}},
+        upsert=True,
+    )
+
+
+# ── daily_reports collection (the generated reports themselves) ──────────
+
+def get_daily_report(report_date: str) -> Optional[DailyReport]:
+    """Returns the generated report for one day ("YYYY-MM-DD", UTC), or None
+    if that day has never been generated. insights == [] is a real,
+    fully-processed result (nothing relevant), not the same as None."""
+    doc = db[DAILY_REPORTS_COLLECTION].find_one({"_id": report_date})
+    if doc is None:
+        return None
+    doc = dict(doc)
+    doc.pop("_id")
+    return DailyReport(**doc)
+
+
+def upsert_daily_report(report: DailyReport) -> None:
+    """Stores (or replaces) one day's generated report, keyed by
+    report_date. Replacing on regeneration is intentional — a re-run for a
+    day supersedes the previous result rather than accumulating."""
+    payload = report.model_dump()
+    payload.pop("report_date")  # it's the _id, no need to duplicate it inside
+    db[DAILY_REPORTS_COLLECTION].update_one(
+        {"_id": report.report_date},
+        {"$set": {**payload, "report_date": report.report_date}},
+        upsert=True,
+    )
+
+
+def get_daily_reports_in_range(start_date: str, end_date: str) -> List[dict]:
+    """Returns lightweight summaries ({report_date, relevant_count,
+    articles_processed}) for every generated report whose date falls in
+    [start_date, end_date] inclusive — both "YYYY-MM-DD". Used to paint the
+    calendar's per-day markers without shipping every insight body. ISO date
+    strings sort lexicographically, so a plain string range works."""
+    cursor = db[DAILY_REPORTS_COLLECTION].find(
+        {"_id": {"$gte": start_date, "$lte": end_date}},
+        {"relevant_count": 1, "articles_processed": 1},
+    )
+    return [
+        {
+            "report_date": doc["_id"],
+            "relevant_count": doc.get("relevant_count", 0),
+            "articles_processed": doc.get("articles_processed", 0),
+        }
+        for doc in cursor
+    ]
+
+
+def get_candidate_counts_for_month(year: int, month: int, min_score: int) -> dict:
+    """{ 'YYYY-MM-DD': count } of report-candidate articles (scored, at/above
+    min_score) per UTC day across one month — the per-day size of the LLM's
+    workload, shown on the calendar so a day's candidate count is visible
+    before it's generated. UTC day boundaries here match those in
+    get_articles_for_report(), so the count and the actual generated pool
+    agree."""
+    start = datetime(year, month, 1, tzinfo=timezone.utc)
+    end = (
+        datetime(year + 1, 1, 1, tzinfo=timezone.utc)
+        if month == 12
+        else datetime(year, month + 1, 1, tzinfo=timezone.utc)
+    )
+    pipeline = [
+        {
+            "$match": {
+                "scored_status": "Scored",
+                "relativity_score": {"$gte": min_score},
+                "published_at": {"$gte": start, "$lt": end},
+                # An expired article's content/vectors have been deliberately
+                # removed (see expire_old_content), so it can't be meaningfully
+                # re-assessed — it drops out of the candidate pool entirely.
+                "ingestion_status": {"$ne": "Expired"},
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%d",
+                        "date": "$published_at",
+                        "timezone": "UTC",
+                    }
+                },
+                "count": {"$sum": 1},
+            }
+        },
+    ]
+    return {doc["_id"]: doc["count"] for doc in articles.aggregate(pipeline)}
+
+
+def get_articles_for_report(report_date: str, min_score: int) -> List[ArticleOut]:
+    """Every article published on the given UTC day ("YYYY-MM-DD") with a
+    relativity_score at or above min_score, highest score first — the
+    candidate pool one day's report generation runs the LLM over. Scoping
+    to already-scored, high-relativity articles is what keeps the LLM's
+    workload (and the day's runtime) bounded to what's plausibly relevant."""
+    day_start = datetime.fromisoformat(report_date).replace(tzinfo=timezone.utc)
+    day_end = day_start + timedelta(days=1)
+    cursor = articles.find(
+        {
+            "scored_status": "Scored",
+            "relativity_score": {"$gte": min_score},
+            "published_at": {"$gte": day_start, "$lt": day_end},
+            # Same exclusion as get_candidate_counts_for_month: an expired
+            # article's content has been removed, so it can't be assessed —
+            # keeping the count and the actual pool in agreement.
+            "ingestion_status": {"$ne": "Expired"},
+        }
+    ).sort("relativity_score", -1)
+    return [ArticleOut(**_serialize_article(doc)) for doc in cursor]
+
+
 def log_scrape_run(
     status: str,
     message: str,
@@ -481,6 +680,28 @@ def get_articles_for_stats(
     return list(articles.find(query, projection))
 
 
+def set_article_translation(
+    article_id: str,
+    translated_title: Optional[str],
+    translated_content: Optional[str],
+    status: str,
+) -> None:
+    """Caches one article's English translation (and status) — written once,
+    on demand, the first time a non-English article is assessed for a report
+    (see services/report_job.py). Later report runs reuse it instead of
+    re-translating."""
+    articles.update_one(
+        {"_id": ObjectId(article_id)},
+        {
+            "$set": {
+                "translated_title": translated_title,
+                "translated_content": translated_content,
+                "translation_status": status,
+            }
+        },
+    )
+
+
 def get_articles_by_ids(article_ids: List[str]) -> List[ArticleOut]:
     """Fetches specific articles by their Mongo _id — used when the user
     selects specific articles to scrape."""
@@ -527,18 +748,20 @@ def get_status_field_counts(field: str, query: Optional[dict] = None) -> dict:
 
 
 def get_running_pipeline_stage() -> Optional[str]:
-    """Returns which pipeline stage — 'extraction', 'embedding', or
-    'scoring' — currently has its in_progress flag set, or None if none
-    do. Used to enforce that only one stage runs at a time: extraction
-    (Playwright/Chromium), embedding (the sentence-transformer model), and
-    scoring (the tree-walk CPU work) are all CPU-heavy and each already
-    guards against overlapping with itself — this is the same guard
-    extended across stages, so a click on "Embed articles" while
-    extraction is still running waits instead of fighting it for CPU."""
+    """Returns which pipeline stage — 'extraction', 'embedding', 'scoring',
+    or 'report generation' — currently has its in_progress flag set, or None
+    if none do. Used to enforce that only one stage runs at a time:
+    extraction (Playwright/Chromium), embedding (the sentence-transformer
+    model), scoring (the tree-walk CPU work), and report generation (the
+    Ollama LLM) are all heavy and each already guards against overlapping
+    with itself — this is the same guard extended across stages, so a click
+    on "Embed articles" while extraction is still running waits instead of
+    fighting it for CPU."""
     for stage, doc_id in (
         ("extraction", META_EXTRACTION_DOC_ID),
         ("embedding", META_EMBEDDING_DOC_ID),
         ("scoring", META_SCORING_DOC_ID),
+        ("report generation", META_REPORT_DOC_ID),
     ):
         if meta.find_one({"_id": doc_id, "in_progress": True}):
             return stage
