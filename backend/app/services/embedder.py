@@ -29,9 +29,14 @@ Workflow, every time it's triggered:
                 article. A failure on one article is logged and does not
                 abort the run — it's simply picked up again next run.
   4. Log     -> one embedding_runs document for the whole run.
+
+The actual chunk/encode/upsert work for each article runs in a persistent
+*subprocess* (services/embedding_worker.py), not in this process directly
+— see _EmbeddingWorker below for why: a subprocess is the only thing that
+can be forcibly killed to reclaim CPU/memory on a timeout, which matters a
+lot for this specific job (see EMBEDDING_TIMEOUT_SECONDS).
 """
 
-import concurrent.futures
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -42,33 +47,23 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from pinecone import Pinecone
-from sentence_transformers import SentenceTransformer
-
 from app import repository
-from app.config import settings
-from app.services.chunking import chunk_text
+from app.services.embedding_worker import EmbeddingWorker
 
 EMBEDDING_MODEL_NAME = "Qwen/Qwen3-Embedding-0.6B"
 PINECONE_INDEX_NAME = "yazaki"
-UPSERT_BATCH_SIZE = 100
 # Weight given to each new per-article duration when updating the
 # seconds-per-article moving average — higher reacts faster to changes in
 # speed, at the cost of more jitter in the reported ETA.
 RATE_EMA_ALPHA = 0.3
-# An article with more raw content than this is skipped (marked "Failed")
-# rather than chunked/embedded — a circuit breaker on top of
-# chunking.py's per-chunk length cap, for whatever chunk_text() still
-# turns into an unreasonably large number of chunks for one article.
-MAX_ARTICLE_CONTENT_CHARS = 50_000
 # An article whose chunking+encoding+upsert takes longer than this is
 # abandoned and marked "Failed" rather than letting it block every article
-# behind it in the run indefinitely. The abandoned worker thread keeps
-# running to completion in the background (Python can't force-kill a
-# thread) — its result is simply discarded, and if it does eventually
-# finish and upsert into Pinecone, those vectors are just orphaned rather
-# than harmful, since this article's Mongo document won't reference them
-# and will be retried (overwriting them) on the next embedding run.
+# behind it in the run indefinitely. Enforced by forcibly killing the
+# worker subprocess handling it (see embedding_worker.py) — the only way
+# to actually reclaim its CPU and memory, since Python can't force-kill a
+# thread. The next article gets a freshly spawned worker (paying the
+# model-reload cost again, but only on this rare path, not on every
+# article).
 EMBEDDING_TIMEOUT_SECONDS = 300
 
 
@@ -79,63 +74,6 @@ class EmbeddingSummary:
     embedded_articles: int = 0
     failed_articles: int = 0
     errors: List[str] = field(default_factory=list)
-
-
-def _embed_one_article(model, index, article) -> List[str]:
-    """Chunks, embeds, and upserts one article's content. Returns the
-    chunk ids that were upserted. Raises on any failure — the caller is
-    responsible for catching this per-article so one bad article doesn't
-    abort the whole run."""
-    content = article.content or ""
-    if len(content) > MAX_ARTICLE_CONTENT_CHARS:
-        raise ValueError(
-            f"Content too long ({len(content)} chars > {MAX_ARTICLE_CONTENT_CHARS} cap) — skipped"
-        )
-
-    chunks = chunk_text(article.id, article.language, content)
-    if not chunks:
-        raise ValueError("No chunks produced from content")
-
-    contents = [chunk["content"] for chunk in chunks]
-    embeddings = model.encode(contents)
-
-    vectors = [
-        {
-            "id": chunk["chunk_id"],
-            "values": embedding.tolist(),
-            "metadata": {
-                "article_id": chunk["article_id"],
-                "url": str(article.url),
-                "order": chunk["order"],
-                "language": chunk["language"],
-                "content": chunk["content"],
-            },
-        }
-        for chunk, embedding in zip(chunks, embeddings)
-    ]
-
-    for i in range(0, len(vectors), UPSERT_BATCH_SIZE):
-        index.upsert(vectors=vectors[i : i + UPSERT_BATCH_SIZE])
-
-    return [vector["id"] for vector in vectors]
-
-
-def _embed_one_article_with_timeout(model, index, article) -> List[str]:
-    """Runs _embed_one_article() on a worker thread and gives up after
-    EMBEDDING_TIMEOUT_SECONDS, raising TimeoutError instead of blocking
-    the whole run on one slow article. Uses a fresh single-use executor
-    (not a shared pool) and shutdown(wait=False) on timeout so the
-    abandoned thread is left to finish on its own time without this call
-    blocking on it — see EMBEDDING_TIMEOUT_SECONDS' docstring for what
-    that means for the abandoned work."""
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(_embed_one_article, model, index, article)
-    try:
-        return future.result(timeout=EMBEDDING_TIMEOUT_SECONDS)
-    except concurrent.futures.TimeoutError:
-        raise TimeoutError(f"Embedding exceeded the {EMBEDDING_TIMEOUT_SECONDS}s timeout")
-    finally:
-        executor.shutdown(wait=False)
 
 
 def run_embedding() -> EmbeddingSummary:
@@ -155,10 +93,6 @@ def run_embedding() -> EmbeddingSummary:
             message="All articles are already embedded — nothing left to embed.",
         )
 
-    model = SentenceTransformer(EMBEDDING_MODEL_NAME)
-    pc = Pinecone(api_key=settings.pinecone_api_key)
-    index = pc.Index(PINECONE_INDEX_NAME)
-
     total = len(candidates)
     embedded_count = 0
     failed_count = 0
@@ -170,32 +104,39 @@ def run_embedding() -> EmbeddingSummary:
     last_checkpoint = time.monotonic()
 
     stopped = False
-    for article in candidates:
-        status = repository.get_embedding_status()
-        if status and status.stop_requested:
-            stopped = True
-            break
+    worker = EmbeddingWorker(EMBEDDING_MODEL_NAME, PINECONE_INDEX_NAME, EMBEDDING_TIMEOUT_SECONDS)
+    try:
+        for article in candidates:
+            status = repository.get_embedding_status()
+            if status and status.stop_requested:
+                stopped = True
+                break
 
-        repository.set_article_embedding_status(article.id, "Pending")
-        try:
-            chunk_ids = _embed_one_article_with_timeout(model, index, article)
-            repository.set_article_embedding_result(article.id, chunk_ids, "Embedded")
-            embedded_count += 1
-        except Exception as e:
-            repository.set_article_embedding_status(article.id, "Failed")
-            failed_count += 1
-            errors.append(f"{article.title}: {e}")
+            repository.set_article_embedding_status(article.id, "Pending")
+            try:
+                chunk_ids = worker.embed(article.id, article.language, article.content, str(article.url))
+                repository.set_article_embedding_result(article.id, chunk_ids, "Embedded")
+                embedded_count += 1
+            except Exception as e:
+                repository.set_article_embedding_status(article.id, "Failed")
+                failed_count += 1
+                errors.append(f"{article.title}: {e}")
 
-        checkpoint = time.monotonic()
-        duration = checkpoint - last_checkpoint
-        last_checkpoint = checkpoint
-        avg_seconds_per_article = (
-            duration if avg_seconds_per_article is None
-            else RATE_EMA_ALPHA * duration + (1 - RATE_EMA_ALPHA) * avg_seconds_per_article
-        )
+            checkpoint = time.monotonic()
+            duration = checkpoint - last_checkpoint
+            last_checkpoint = checkpoint
+            avg_seconds_per_article = (
+                duration if avg_seconds_per_article is None
+                else RATE_EMA_ALPHA * duration + (1 - RATE_EMA_ALPHA) * avg_seconds_per_article
+            )
 
-        repository.set_embedding_progress(total, embedded_count + failed_count)
-        repository.set_embedding_rate(avg_seconds_per_article)
+            repository.set_embedding_progress(total, embedded_count + failed_count)
+            repository.set_embedding_rate(avg_seconds_per_article)
+    finally:
+        # Always tears down the worker subprocess — whether the run
+        # finished, was stopped, or raised — so nothing is left running
+        # after run_embedding() returns.
+        worker.shutdown()
 
     if stopped:
         run_status = "stopped"
