@@ -9,6 +9,7 @@ and all routers. Run with:
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app import database, repository
 from app.routers import articles, embedding, extraction, reports, scoring, stats, update
@@ -58,6 +59,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Yazaki News Monitor API",
     lifespan=lifespan,
+)
+
+# The Streamlit frontend never needed this — its Python code calls the
+# backend server-side, outside the browser entirely. The React frontend
+# fetches directly from the browser (see frontend-react/src/api/client.ts),
+# so without explicit CORS headers the browser silently blocks every
+# request as cross-origin (5174 -> 8000). Scoped to localhost dev ports
+# rather than "*" since credentials aren't used and this only needs to
+# work from developer machines for now.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+    ],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 app.include_router(update.router)

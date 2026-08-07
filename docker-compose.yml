@@ -150,6 +150,48 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # New React frontend, built alongside the existing Streamlit `frontend`
+  # service rather than replacing it — both run at once, on different
+  # ports, so the working dashboard stays available the whole time this
+  # is being built out and reviewed. Cut over (and retire `frontend`)
+  # only once this one's confirmed to actually work end to end.
+  frontend-react:
+    build:
+      context: ./frontend-react
+    ports:
+      - "5174:5174"
+    environment:
+      # This runs in the user's browser (client-side), not inside the
+      # Compose network like the Streamlit frontend's Python code does —
+      # so it must be the host-published address ("backend" the Docker
+      # service name would not resolve from the browser), not
+      # http://backend:8000.
+      - VITE_BACKEND_API_URL=http://localhost:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Runs the full Update -> Extract -> Embed -> Score -> Report pipeline
+  # once a day at PIPELINE_HOUR_UTC:00 UTC, driving it through the same
+  # HTTP endpoints the dashboard's buttons use (see scheduler/run_pipeline.py).
+  # Deliberately a plain Python sleep-until-next-run loop rather than cron
+  # or an external orchestrator (Airflow/Prefect/etc.) — this is one linear
+  # job run once a day, so the extra infrastructure isn't earning its
+  # keep yet. Being just another Compose service means it deploys to the
+  # Azure VM identically to everything else, with no separate scheduling
+  # setup on the host.
+  scheduler:
+    build:
+      context: ./scheduler
+    environment:
+      - BACKEND_API_URL=http://backend:8000
+      # - PIPELINE_HOUR_UTC=2  # default; override here if a different time is needed
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   mongo-data:
   hf-model-cache:
