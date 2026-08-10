@@ -21,8 +21,8 @@ Yazaki Morocco doesn't operate in isolation. Its business is directly exposed to
 
 ## What it actually does
 
-1. **Searches for news** matching a curated keyword list — company names, ports, logistics terms — across English, French, and Arabic sources, using the [GNews API](https://gnews.io).
-2. **Filters out noise** — job postings and other irrelevant matches are automatically excluded, and duplicate articles (the same story picked up by multiple keyword searches) are deduplicated.
+1. **Searches for news** matching a curated keyword list — company names, ports, logistics terms — across English, French, and Arabic sources, pulling from **five independent free news APIs at once** (GNews, NewsAPI.org, NewsData.io, Currents, TheNewsAPI.com) — see [News sources](#news-sources) for signup links and what each one adds.
+2. **Filters out noise** — job postings and other irrelevant matches are automatically excluded, and duplicate articles (the same story picked up by multiple keyword searches, or independently found by more than one of the five sources) are deduplicated.
 3. **Stores everything in MongoDB**, tagged with exactly which keyword(s) each article matched.
 4. **Presents an interactive dashboard** where you can:
    - See today's and this month's totals and most-mentioned keyword at a glance
@@ -44,7 +44,15 @@ Yazaki Morocco doesn't operate in isolation. Its business is directly exposed to
 
 ```mermaid
 flowchart LR
-    GNews[("GNews API")] -->|scrapes| Backend["FastAPI Backend"]
+    subgraph Sources["5 news APIs (source_client.py)"]
+      direction TB
+      GNews[("GNews")]
+      NewsAPIOrg[("NewsAPI.org")]
+      NewsDataIO[("NewsData.io")]
+      Currents[("Currents")]
+      TheNewsAPI[("TheNewsAPI.com")]
+    end
+    Sources -->|scrapes, merges, dedupes| Backend["FastAPI Backend"]
     Backend -->|stores / queries| Mongo[("MongoDB")]
     Backend -->|chunk + embed| Model["Qwen3-Embedding-0.6B\n(sentence-transformers)"]
     Model -->|vectors| Pinecone[("Pinecone\nvector index")]
@@ -61,9 +69,9 @@ flowchart LR
 | Layer | Technology | Role |
 |---|---|---|
 | Database | MongoDB | Stores articles, scrape/extraction/embedding/scoring status + history, relativity-feedback threshold overrides, cached translations, and generated daily reports |
-| Backend | FastAPI (Python) | Scrapes GNews, matches keywords, extracts article content, chunks + embeds content, scores relevance, generates daily LLM reports, exposes a REST API |
+| Backend | FastAPI (Python) | Scrapes 5 news sources, matches keywords, extracts article content, chunks + embeds content, scores relevance, generates daily LLM reports, exposes a REST API |
 | Frontend | Streamlit (Python) | Interactive dashboard — charts, filters, ranked/color-coded article list, extraction + embedding + scoring controls, per-article detail page, and a daily-report calendar |
-| Data source | [GNews API](https://gnews.io) | News search, title/description matching |
+| Data sources | [GNews](https://gnews.io), [NewsAPI.org](https://newsapi.org), [NewsData.io](https://newsdata.io), [Currents](https://currentsapi.services), [TheNewsAPI.com](https://thenewsapi.com) | Five independent news-search APIs, each normalized into a shared shape and merged — see [News sources](#news-sources) |
 | Content extraction | Playwright + trafilatura | Loads each article in a headless browser and pulls out its main text |
 | Embedding model | [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) via `sentence-transformers` | Turns article-text chunks into 1024-dimensional vectors, CPU inference, no LangChain |
 | Vector store | [Pinecone](https://www.pinecone.io) | Stores and indexes chunk embeddings (index name: `yazaki`, cosine metric); also the source the scorer reads chunk vectors back from |
@@ -91,8 +99,11 @@ news-scraper-ymo/
 │   │   ├── llm_insight_business_logic.md   # LLM rules: how to judge supply-chain relevance + fill the report JSON
 │   │   ├── llm_insight_sap_attributes.md   # The strict list of SAP parameters the LLM may cite
 │   │   ├── routers/                 # API endpoints (articles, extraction, embedding, scoring, reports, stats, update)
-│   │   └── services/                # GNews client, keyword matching, scraping, stats, extraction,
-│   │                                 # chunking, embedding, relativity scoring, LLM insight + report job
+│   │   └── services/                # source_client.py (shared shape) + 5 pluggable news-source clients
+│   │                                 # (gnews_client.py, newsapi_org_client.py, newsdata_io_client.py,
+│   │                                 # currents_client.py, thenewsapi_com_client.py), keyword matching,
+│   │                                 # scraping orchestration, stats, extraction, chunking, embedding,
+│   │                                 # relativity scoring, LLM insight + report job
 │   ├── extracted_articles/          # .txt output of successful extractions (not in a Docker volume)
 │   ├── yazaki_news/                 # mongodump snapshot checked into git — see "Syncing the database"
 │   ├── test_extraction.py           # Standalone Playwright/trafilatura proof-of-concept script
@@ -121,7 +132,8 @@ news-scraper-ymo/
 ### Prerequisites
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
-- A free GNews API key — [sign up here](https://gnews.io/register)
+- A free GNews API key — [sign up here](https://gnews.io/register) (**required** — the backend won't start without it)
+- (Optional, but recommended) free API keys for the other four news sources — see [News sources](#news-sources) for signup links; the app runs fine with just GNews, each additional key just adds another source's coverage
 - A [Pinecone](https://www.pinecone.io) account and API key, with an index named `yazaki` created (dimension `1024`, metric `cosine`) — needed for both embedding and relativity scoring (the scorer reads chunk vectors back from the same index)
 - (Optional) A Hugging Face token if you ever need to re-download the embedding model — see the note on the model cache below
 
@@ -138,9 +150,15 @@ news-scraper-ymo/
    MONGO_URI=mongodb://localhost:27017
    MONGO_DB_NAME=yazaki_news
    GNEWS_API_KEY=your_actual_gnews_api_key_here
+   NEWSAPI_ORG_API_KEY=your_newsapi_org_api_key_here
+   NEWSDATA_IO_API_KEY=your_newsdata_io_api_key_here
+   CURRENTS_API_KEY=your_currents_api_key_here
+   THENEWSAPI_COM_API_KEY=your_thenewsapi_com_api_key_here
    HF_TOKEN=your_huggingface_token_here
    PINECONE_API_KEY=your_pinecone_api_key_here
    ```
+   Only `GNEWS_API_KEY` is required — leave the other four blank (or omit them entirely) and the app runs fine on GNews alone. See [News sources](#news-sources) for where to get each one and what it adds.
+
    (`MONGO_URI` is automatically overridden inside Docker — no need to change it for the container setup.)
 
 3. **Seed the embedding model cache (one-time, first setup only).** The Qwen3-Embedding-0.6B model is *not* downloaded during the Docker build — it lives in a persistent named volume (`hf-model-cache`) instead, because some corporate networks block outbound access to `huggingface.co` (see [Known limitations](#known-limitations)). On a machine with normal internet access:
@@ -163,10 +181,28 @@ news-scraper-ymo/
 
 ---
 
+## News sources
+
+Article discovery pulls from **five independent free news APIs**, each wrapped in its own client module under `backend/app/services/` that normalizes that API's own field names, date format, pagination style, and quirks into one shared shape (`RawArticle` / `FetchResult`, defined in `source_client.py`). `scraper.py` just iterates a `SOURCES` list calling each one — one source failing or being unconfigured never stops the others, and adding a new source later is just a new client module plus one line registering it.
+
+| Source | Sign up | Env var | Free tier — what to know |
+|---|---|---|---|
+| **GNews** | [gnews.io/register](https://gnews.io/register) | `GNEWS_API_KEY` (**required**) | 100 requests/day, 1 request/sec |
+| **NewsAPI.org** | [newsapi.org/register](https://newsapi.org/register) | `NEWSAPI_ORG_API_KEY` | 100 requests/day. ⚠️ Their free "Developer" plan's terms restrict it to development/testing use, not a live/production deployment — accepted knowingly for this project; if that matters for your deployment, upgrade their plan before relying on it |
+| **NewsData.io** | [newsdata.io/register](https://newsdata.io/register) | `NEWSDATA_IO_API_KEY` | 200 credits/day (~10 articles/credit). The free `/latest` endpoint can't filter by date server-side at all (a 422 if you try) — the client fetches "latest" and filters to the requested date range in code instead. 100-character query cap (tighter than the others) |
+| **Currents** | [currentsapi.services/en/register](https://currentsapi.services/en/register) | `CURRENTS_API_KEY` | 600–1,000 requests/day, no credit card required. Date range is capped at 7 days per request — a longer catch-up range is automatically split into consecutive ≤7-day windows |
+| **TheNewsAPI.com** | [thenewsapi.com/register](https://www.thenewsapi.com/register) | `THENEWSAPI_COM_API_KEY` | Only 100 requests/day **and** only 3 articles per request — by far the smallest of the five, useful as a supplementary source rather than a primary one |
+
+Only `GNEWS_API_KEY` is required. Each additional key is picked up automatically the next time the backend starts — no code changes needed. A source with no key configured just contributes nothing (its `fetch_articles()` no-ops) rather than erroring.
+
+Articles found by more than one source (or that reappear across overlapping scrape runs) are deduplicated by URL automatically — see `repository.upsert_article()`. A same-day live test across all five sources found roughly a 9% duplicate rate before dedup.
+
+---
+
 ## Using the dashboard
 
 - **Overview bar** — today's and this month's article totals and top keyword, when data was last refreshed, and the **Update / Extract articles / Embed articles / Relativity scoring** controls (each with a live progress bar + ETA while running, and a "🛑 Stop" button in its place once a run is in flight).
-- **"Update now"** — triggers a fresh scrape. Safe to click anytime: if it's already up to date for today, it does nothing rather than wasting API quota. A full run takes roughly 30–60 seconds due to deliberate rate-limiting on the free GNews plan.
+- **"Update now"** — triggers a fresh scrape across all configured news sources (see [News sources](#news-sources)). Safe to click anytime: if it's already up to date for today, it does nothing rather than wasting API quota. A full run typically takes a few minutes, since each source is deliberately rate-limited on its own free plan and they're queried one after another.
 - **Chart** — pick Day, Week, or Month, and navigate to any specific period (not just the current one). Bars are split by language (English / French / Arabic).
 - **Click any bar** — the panel below updates to show that period's total, top keyword, per-language breakdown, and the actual list of articles, **ranked by relativity score** (highest first; not-yet-scored articles sort to the end).
 - **Keyword filter** — narrows the article list only; it never changes the chart or the summary numbers above it.
@@ -327,7 +363,9 @@ Edit these two files to change what the reports flag and how — extend the SAP 
 
 **Keywords** — edit `backend/app/keywords.py` to add or remove search terms. Each language (`en`, `fr`, `ar`) has its own list, since company names need to be transliterated (not just translated) to actually match Arabic-language headlines — e.g. Renault appears as "رينو", not "Renault".
 
-**Scrape window** — the first-ever run defaults to the last 7 days. Adjust `DAYS_BACK` in `backend/app/services/scraper.py` to change this.
+**Scrape window** — the first-ever run defaults to the last 7 days. Adjust `DEFAULT_DAYS_BACK` in `backend/app/services/scraper.py` to change this.
+
+**News sources** — `SOURCES` in `backend/app/services/scraper.py` is the list of active source clients; comment one out to disable it without deleting the module, or add a new one by writing a client that matches `source_client.py`'s `RawArticle`/`FetchResult` shape and appending its `fetch_articles` to the list. Per-source tunables (query-length caps, page size, rate-limit delays, max pages) live as constants at the top of each `*_client.py` file. See [News sources](#news-sources) for the current five and their free-tier limits.
 
 **Excluded words** — `EXCLUDE_WORDS_BY_LANGUAGE` in `keywords.py` controls what gets filtered out (e.g. job postings). Add more terms per language as needed.
 
@@ -426,8 +464,9 @@ docker compose down -v
 
 ## Known limitations
 
-- **GNews free plan**: 100 requests/day, capped article results per request. A busy day with a lot of keyword chunks across three languages can approach this limit.
-- **Single shared "last updated" watermark** across all languages — if one language fails during a run, the whole run is marked partial and retried together next time, rather than tracking each language independently.
+- **Every news source's free tier is limited in its own way** — see the [News sources](#news-sources) table for specifics (GNews: 100 requests/day; NewsAPI.org: 100/day and free-tier terms restrict it to dev/testing use; NewsData.io: 200 credits/day, no server-side date filtering, 100-char query cap; Currents: 7-day max date range per request; TheNewsAPI.com: 100 requests/day *and* only 3 articles/request). A busy day with many keyword chunks across three languages can approach these limits, especially TheNewsAPI.com's.
+- **Content previews, not full articles, from any of the five sources** — none of the free tiers return the complete article body (GNews/NewsAPI.org give a truncated preview a few hundred characters long; NewsData.io and Currents give none at all). Full text still only comes from the extraction stage's real page fetch (see [Article content extraction](#article-content-extraction)) — the sources are for discovery, not content.
+- **Single shared "last updated" watermark** across all languages *and* all five sources — if one source or language fails during a run, the whole run is marked partial and retried together next time, rather than tracking each independently.
 - **Bucket boundaries use Morocco local time** (`Africa/Casablanca`), correctly accounting for its seasonal Ramadan time change — but this means an article published late at night UTC may appear to belong to "the next day" in the dashboard.
 - **Extracted `.txt` files aren't in a Docker volume** — they're written to `backend/extracted_articles/` inside the backend container's writable layer, so they're lost on `docker compose down` (the database copy of the content survives, since Mongo's volume is separate). Add a volume mount if you need them to persist.
 - **The extraction lock is in-memory and per-process** — it correctly prevents two overlapping runs within a single backend container, but wouldn't coordinate across multiple backend replicas if this were ever scaled horizontally. The embedding and scoring jobs' guards, by contrast, are Mongo-backed and do survive a restart (and are automatically reset on backend startup if a process was killed mid-run).
