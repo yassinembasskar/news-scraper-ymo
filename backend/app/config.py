@@ -5,6 +5,8 @@ Values are read from a `.env` file (or actual environment variables) at the
 project root. See `.env.example` for the variables this expects.
 """
 
+from typing import Optional
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,6 +17,14 @@ class Settings(BaseSettings):
 
     # GNews API
     gnews_api_key: str
+
+    # NewsAPI.org, NewsData.io, Currents, TheNewsAPI.com — optional: the app
+    # runs fine on whichever source keys are configured while more are
+    # added one at a time (see scraper.py's SOURCES registry).
+    newsapi_org_api_key: Optional[str] = None
+    newsdata_io_api_key: Optional[str] = None
+    currents_api_key: Optional[str] = None
+    thenewsapi_com_api_key: Optional[str] = None
 
     # Pinecone (article chunk embeddings)
     pinecone_api_key: str

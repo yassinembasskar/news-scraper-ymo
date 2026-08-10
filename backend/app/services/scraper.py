@@ -4,10 +4,19 @@ Scrape orchestrator.
 This is the only place that decides WHEN to scrape and WHAT to do with the
 results. It ties together the pieces built separately:
   - repository.py       -> reads/writes last_scraped, upserts articles
-  - gnews_client.py      -> knows how to talk to GNews, nothing else
+  - gnews_client.py, ... -> each source client knows how to talk to its own
+                            API, nothing else — see source_client.py for the
+                            common RawArticle/FetchResult shape they all
+                            return, so this file never touches a source's
+                            raw JSON.
   - keyword_matcher.py   -> tags articles with matched keywords, flags exclusions
 
-Date-range decision (single global last_scraped, shared across all languages):
+Adding a new source is adding a new client module (mirroring
+gnews_client.py) and registering its fetch_articles in SOURCES below —
+nothing else here needs to change.
+
+Date-range decision (single global last_scraped, shared across all sources
+and languages):
   - never scraped before      -> last 7 days, ending today
   - already scraped today     -> do nothing, report "skipped"
   - scraped on an earlier day -> catch up from that day to today
@@ -15,14 +24,31 @@ Date-range decision (single global last_scraped, shared across all languages):
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from pydantic import ValidationError
 
 from app import repository
-from app.keywords import KEYWORDS_BY_LANGUAGE
 from app.models import ArticleCreate, ScrapeStatus
-from app.services import gnews_client, keyword_matcher
+from app.services import (
+    currents_client,
+    gnews_client,
+    keyword_matcher,
+    newsapi_org_client,
+    newsdata_io_client,
+    thenewsapi_com_client,
+)
+from app.services.source_client import FetchResult, RawArticle
+
+# Every registered source is tried on each run; one source's fetch_articles
+# raising or returning errors doesn't stop the others (see run_scrape()).
+SOURCES: List[Callable[[datetime, datetime], FetchResult]] = [
+    gnews_client.fetch_articles,
+    newsapi_org_client.fetch_articles,
+    newsdata_io_client.fetch_articles,
+    currents_client.fetch_articles,
+    thenewsapi_com_client.fetch_articles,
+]
 
 DEFAULT_DAYS_BACK = 7
 
@@ -38,14 +64,6 @@ class ScrapeSummary:
     excluded_articles: int = 0
     malformed_articles: int = 0
     errors: List[str] = field(default_factory=list)
-
-
-def _parse_gnews_date(value: Optional[str]) -> datetime:
-    """Parses GNews's publishedAt ('YYYY-MM-DDTHH:MM:SSZ', optionally with
-    fractional seconds) into a timezone-aware datetime."""
-    if not value:
-        raise ValueError("Missing publishedAt")
-    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _determine_date_range(now: datetime) -> Optional[tuple]:
@@ -68,30 +86,26 @@ def _determine_date_range(now: datetime) -> Optional[tuple]:
     return now - timedelta(days=DEFAULT_DAYS_BACK), now
 
 
-def _process_raw_article(raw: dict) -> tuple:
-    """Turns one raw GNews article into an ArticleCreate, or reports why it
-    was skipped. Returns ('kept', ArticleCreate) / ('excluded', None) /
-    ('malformed', None)."""
-    language = raw.get("lang", "en")
-    title = raw.get("title", "") or ""
-    description = raw.get("description")
-
-    if keyword_matcher.is_excluded(title, language):
+def _process_article(raw: RawArticle) -> tuple:
+    """Turns one already-normalized RawArticle (from any source) into an
+    ArticleCreate, or reports why it was skipped. Returns
+    ('kept', ArticleCreate) / ('excluded', None) / ('malformed', None)."""
+    if keyword_matcher.is_excluded(raw.title, raw.language):
         return "excluded", None
 
-    matched_keywords = keyword_matcher.find_matched_keywords(title, description, language)
+    matched_keywords = keyword_matcher.find_matched_keywords(raw.title, raw.description, raw.language)
 
     try:
         article = ArticleCreate(
-            url=raw["url"],
-            title=title,
-            description=description,
-            source_name=(raw.get("source") or {}).get("name"),
-            published_at=_parse_gnews_date(raw.get("publishedAt")),
-            language=language,
+            url=raw.url,
+            title=raw.title,
+            description=raw.description,
+            source_name=raw.source_name,
+            published_at=raw.published_at,
+            language=raw.language,
             matched_keywords=matched_keywords,
         )
-    except (ValidationError, KeyError, ValueError):
+    except ValidationError:
         return "malformed", None
 
     return "kept", article
@@ -111,15 +125,16 @@ def _build_message(summary: "ScrapeSummary") -> str:
     base = f"Scrape {summary.status}: " + ", ".join(parts) + "."
 
     if summary.errors:
-        base += f" Errors in {len(summary.errors)} language(s): " + "; ".join(summary.errors)
+        base += f" Errors in {len(summary.errors)} request(s): " + "; ".join(summary.errors)
 
     return base
 
 
 def run_scrape() -> ScrapeSummary:
-    """Runs one incremental scrape and returns a summary. Safe to call
-    repeatedly — if already caught up today, it no-ops instead of burning
-    GNews quota for nothing."""
+    """Runs one incremental scrape across every registered source (see
+    SOURCES) and returns a combined summary. Safe to call repeatedly — if
+    already caught up today, it no-ops instead of burning API quota for
+    nothing."""
     now = datetime.now(timezone.utc)
 
     date_range = _determine_date_range(now)
@@ -130,15 +145,22 @@ def run_scrape() -> ScrapeSummary:
 
     date_from, date_to = date_range
 
-    fetch_result = gnews_client.fetch_articles(date_from, date_to)
+    all_raw_articles: List[RawArticle] = []
+    all_errors: List[str] = []
+    malformed_count = 0
+
+    for fetch_articles in SOURCES:
+        fetch_result = fetch_articles(date_from, date_to)
+        all_raw_articles.extend(fetch_result.articles)
+        all_errors.extend(fetch_result.errors)
+        malformed_count += fetch_result.malformed_count
 
     new_count = 0
     duplicate_count = 0
     excluded_count = 0
-    malformed_count = 0
 
-    for raw in fetch_result.articles:
-        outcome, article = _process_raw_article(raw)
+    for raw in all_raw_articles:
+        outcome, article = _process_article(raw)
 
         if outcome == "excluded":
             excluded_count += 1
@@ -153,9 +175,13 @@ def run_scrape() -> ScrapeSummary:
         else:
             duplicate_count += 1
 
-    if not fetch_result.errors:
+    # "failed" means every source came back empty-handed despite errors —
+    # not just that some request somewhere failed, since with several
+    # sources running one bad request shouldn't overshadow the others still
+    # having delivered articles.
+    if not all_errors:
         run_status = "success"
-    elif len(fetch_result.errors) >= len(KEYWORDS_BY_LANGUAGE):
+    elif not all_raw_articles:
         run_status = "failed"
     else:
         run_status = "partial"
@@ -182,7 +208,7 @@ def run_scrape() -> ScrapeSummary:
         duplicate_articles=duplicate_count,
         excluded_articles=excluded_count,
         malformed_articles=malformed_count,
-        errors=fetch_result.errors,
+        errors=all_errors,
     )
     summary.message = _build_message(summary)
 
