@@ -14,8 +14,11 @@ LANGUAGES = ("en", "fr", "ar")
 with open(TREE_PATH, encoding="utf-8") as f:
     tree = json.load(f)
 
+# Preserve calibrated per-node thresholds (baseline 0.4 — see
+# services/scorer.py's SCORE_POWER comment); only fill in nodes that
+# don't have one yet, instead of resetting everything.
 for node in tree.values():
-    node["threshold"] = 0.2
+    node.setdefault("threshold", 0.4)
 
 texts = []
 index = []

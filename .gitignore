@@ -44,3 +44,8 @@ backend/llm_insight_test_results/
 
 # Project report — generated locally, kept out of version control.
 PROJECT_REPORT.md
+
+# tools/ — standalone one-off scripts (e.g. SharePoint scraper), not part
+# of the app; includes the saved login session (auth cookies) and any
+# crawled/scraped output.
+tools/

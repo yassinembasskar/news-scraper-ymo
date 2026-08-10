@@ -1,28 +1,30 @@
-# 📰 Yazaki Morocco — News & Supply Chain Monitor
+# 📰 News Intelligence & Business-Relevance Platform
 
-An automated news intelligence dashboard that continuously tracks what's being said — in **English, French, and Arabic** — about Yazaki, its OEM customers, its competitors, and the global shipping routes and ports its supply chain depends on. Beyond the dashboard, it also builds a **semantic index** of everything it collects and **automatically scores how relevant each article actually is** to Yazaki's business against a hand-built relevance tree — turning the article archive into something that can be searched, ranked, and reasoned over by meaning, not just keyword. Finally, a **local LLM (Qwen2.5-7B via Ollama)** turns each day's most relevant articles into a **daily insight report** — a short, structured assessment of which concrete SAP supply-chain parameter each event affects, in which direction, and what to do about it.
+An automated news intelligence pipeline that continuously tracks what's being said — in **multiple languages at once** — about the companies, competitors, and logistics networks a business depends on. It doesn't just collect articles: it builds a **semantic index** of everything it finds and **automatically scores how relevant each one actually is** against a hand-built relevance tree, turning a raw news firehose into something ranked and reasoned-over by meaning, not just keyword matches. A **local LLM** (no external AI API — runs fully offline, on your own hardware) then turns each day's most relevant articles into a **daily insight report**: a short, structured assessment of which concrete operational parameter each event affects, in which direction, and what to do about it.
+
+Every part of *what* the platform tracks and *how* it judges relevance — keywords, the relevance taxonomy, the LLM's business rules — lives in a handful of plain config files, not in application code. This repo ships with a **working reference configuration** built for one real deployment (a Yazaki Morocco automotive-supply-chain use case) so the whole pipeline is demonstrably functional end to end, not a template with a business logic gap in the middle. Repointing it at a different company/industry means editing those config files — see [Adapting this to your organization](#adapting-this-to-your-organization) — not touching the backend, frontend, or pipeline logic.
 
 ---
 
-## Why this project matters
+## The problem this solves
 
-Yazaki Morocco doesn't operate in isolation. Its business is directly exposed to:
+No company operates in isolation. Almost every business has some version of the same exposure:
 
-- **Its OEM customers** (Renault, Stellantis, Peugeot, Citroën, Dacia) — a slowdown, plant announcement, or strategy shift at any of them has direct downstream consequences for Yazaki's own production planning.
-- **Its direct competitors** (Sumitomo Electric, Leoni, Aptiv, Lear) — knowing what competitors are doing (expansions, contract wins, plant issues) is competitive intelligence that's otherwise scattered across dozens of sources.
-- **Global shipping and logistics** — a container backlog at a Chinese port, congestion at Tanger Med, or disruption in the Suez Canal / Red Sea shipping lanes can delay raw materials in or finished goods out, often with days or weeks of lead time before it's felt on the factory floor.
-- **Industry-wide shocks** — semiconductor shortages and other automotive supply chain disruptions have repeatedly caused production stoppages across the whole industry in recent years.
+- **Customers** — a slowdown, plant announcement, or strategy shift at a major customer has direct downstream consequences for your own planning.
+- **Competitors** — knowing what competitors are doing (expansions, contract wins, plant issues) is competitive intelligence that's otherwise scattered across dozens of sources.
+- **Suppliers and logistics** — a port backlog, a shipping-lane disruption, or a key supplier's plant issue can delay materials in or goods out, often with days or weeks of lead time before it's felt operationally.
+- **Industry-wide shocks** — sector-specific disruptions (shortages, regulatory shifts, macro events) repeatedly cause knock-on effects across an entire industry.
 
-**The problem this solves:** relevant news about all of the above is published continuously, in three different languages, across hundreds of sources — no one person can manually monitor all of it every day, and not every article that *mentions* a keyword is actually *relevant*. This project automates both the monitoring and the triage.
+Relevant news about all of the above is published continuously, often in multiple languages, across hundreds of sources — no one person can manually monitor all of it every day, and not every article that *mentions* a tracked name is actually *relevant*. This platform automates both the monitoring and the triage: it turns "read the news yourself and hope you didn't miss anything" into a ranked, reasoned, and eventually LLM-summarized stream, giving earlier visibility into risk, competitor activity, and customer news than manual monitoring realistically can — the kind of early warning that turns a "we found out too late" situation into "we saw this coming."
 
-**The result:** earlier visibility into supply chain risk, competitor activity, and customer news — ranked by how relevant it actually is — the kind of early warning that turns a "we found out too late" situation into "we saw this coming."
+**The included reference configuration** points all of this at a real example: Yazaki Morocco's automotive supply chain — its OEM customers (BMW, Renault/Dacia, Stellantis, Ford, JLR, Mercedes, Toyota, Honda, Nissan, Volvo), its direct competitors (Sumitomo Electric, Leoni, Aptiv, Lear, Motherson, Kromberg & Schubert, Draexlmaier), and the ports/shipping lanes its EMEA manufacturing footprint depends on (Tanger Med, Algeciras, Suez/Red Sea, and others). It's there to prove the pipeline works end to end against a real domain, not as the platform's actual scope.
 
 ---
 
 ## What it actually does
 
-1. **Searches for news** matching a curated keyword list — company names, ports, logistics terms — across English, French, and Arabic sources, pulling from **five independent free news APIs at once** (GNews, NewsAPI.org, NewsData.io, Currents, TheNewsAPI.com) — see [News sources](#news-sources) for signup links and what each one adds.
-2. **Filters out noise** — job postings and other irrelevant matches are automatically excluded, and duplicate articles (the same story picked up by multiple keyword searches, or independently found by more than one of the five sources) are deduplicated.
+1. **Searches for news** matching a curated keyword list — company names, places, logistics terms, whatever matters to your configuration — across as many languages as you configure, pulling from **five independent free news APIs at once** (GNews, NewsAPI.org, NewsData.io, Currents, TheNewsAPI.com) — see [News sources](#news-sources) for signup links and what each one adds.
+2. **Filters out noise** — irrelevant matches (e.g. job postings) are automatically excluded, and duplicate articles (the same story picked up by multiple keyword searches, or independently found by more than one of the five sources) are deduplicated.
 3. **Stores everything in MongoDB**, tagged with exactly which keyword(s) each article matched.
 4. **Presents an interactive dashboard** where you can:
    - See today's and this month's totals and most-mentioned keyword at a glance
@@ -33,10 +35,48 @@ Yazaki Morocco doesn't operate in isolation. Its business is directly exposed to
 5. **Updates incrementally** — click "Update now" and it only fetches what's changed since the last successful run, rather than re-fetching everything every time.
 6. **Extracts full article text** — click "Extract articles" and it opens each not-yet-extracted article in a real headless browser, pulls out the main body text (skipping ads/navigation/cookie banners), and saves it. Articles it can't extract automatically (paywalls, cookie walls, unusual page layouts) can be retried or have their content pasted in manually.
 7. **Embeds and indexes article content** — click "Embed articles" and every successfully-extracted article is split into chunks, turned into vector embeddings, and upserted into a Pinecone vector index — the foundation for semantic search, retrieval, and the relevance scoring below.
-8. **Scores every embedded article for relevance** — click "Relativity scoring" and each article's chunk embeddings are walked through a hand-built relevance tree (automotive industry → OEMs, competitors, ports, logistics, etc.) to produce a 0–100 relativity score, plus a full explanation of exactly which tree nodes it matched and why.
+8. **Scores every embedded article for relevance** — click "Relativity scoring" and each article's chunk embeddings are walked through a hand-built relevance tree (your industry taxonomy → key entities, suppliers, logistics chokepoints, etc.) to produce a 0–100 relativity score, plus a full explanation of exactly which tree nodes it matched and why.
 9. **Learns from feedback** — "👍 More" / "👎 Less" buttons on any scored article let a human correct the score directly, while also nudging the underlying tree's sensitivity so future articles benefit from the correction too.
 10. **Lets you drill into any article** — "See more" opens a detail page with the full scraped text and a visual breakdown of every relevance-tree node it triggered.
-11. **Generates daily insight reports with a local LLM** — a **Reports** calendar page where you can generate, for any day, an LLM assessment of that day's most-relevant articles: each genuinely operational event becomes a structured card (the affected **SAP parameter**, whether the effect is positive/negative/neutral, a confidence %, and a concrete recommended action), while off-topic articles are silently dropped. Non-English articles are **translated to English first** (and the translation is cached), because the model judges relevance far more reliably in English.
+11. **Generates daily insight reports with a local LLM** — a **Reports** calendar page where you can generate, for any day, an LLM assessment of that day's most-relevant articles: each genuinely operational event becomes a structured card (the affected **operational parameter**, whether the effect is positive/negative/neutral, a confidence %, and a concrete recommended action), while off-topic articles are silently dropped. Non-English articles are **translated to English first** (and the translation is cached), because the model judges relevance far more reliably in English.
+
+---
+
+## KPIs & operational metrics
+
+The point of the pipeline isn't just "more articles" — it's a small number of numbers that tell you whether the system is actually doing its job and what it's finding. Some of these are already computed and visible today; others are straightforward extensions of data the app already collects (flagged below), useful to know about whether you're using the Yazaki reference config or your own.
+
+| KPI | What it tells you | Status |
+|---|---|---|
+| **Articles/day, articles/month** | Raw ingestion volume, and whether coverage is keeping pace with your keyword list | ✅ Live — overview bar + day/week/month chart |
+| **Language mix** | Whether coverage is balanced across the languages you configured, or skewed to one | ✅ Live — every chart bucket is split by language |
+| **Top keyword** (today / this month) | Which tracked entity is currently generating the most news — an early signal on its own | ✅ Live — overview bar |
+| **Pipeline funnel counts** (extraction / embedding / scoring, each scoped to its own real candidate pool) | Where articles are in the pipeline right now, and where the backlog (if any) is | ✅ Live — under each stage's button |
+| **Extraction / embedding / scoring success rate** | What fraction of attempts actually complete vs. fail (paywalls, layout issues, model errors) — the health of the pipeline itself, not just its throughput | 🔧 Trivial to add — `successful / total` from the funnel counts already returned by `/stats/pipeline` |
+| **Relativity-score distribution** | How much of what's ingested is actually relevant — a pipeline pulling in mostly noise (bottom-heavy distribution) needs its keywords or tree retuned, not more sources | 🔧 Straightforward — `relativity_score` is stored per article today, just not aggregated into a histogram yet |
+| **Report yield rate** (relevant insights ÷ candidate articles assessed) | How much of the "high-relevance" tier actually turns into an actionable insight vs. gets correctly discarded as not operationally concrete | ✅ Partially live per day (the report calendar shows `relevant_count` / `articles_processed` per day) — 🔧 aggregating across a month is a small addition |
+| **Report coverage** (days with a generated report ÷ days with candidate articles) | Whether report generation is keeping up with what's actually available to report on | ✅ Visible on the calendar (marked vs. unmarked days) — 🔧 not yet summarized as a single %  |
+| **Pipeline latency** (avg seconds/article, per stage) | How long each stage actually takes on your hardware — used internally for live ETAs already, worth surfacing historically to catch a stage silently degrading over time | ✅ Live during a run (the ETA) — 🔧 not persisted per historical run yet |
+| **Duplicate/redundancy rate** | How much of the "relevant" tier is actually the same handful of stories covered repeatedly (a real, measured problem in testing — see [Known limitations](#known-limitations)) | 🔧 Not built yet — the natural next metric once deduplication ships |
+| **API quota usage** | Headroom left on the news-source rate limit (relevant on any capped free/paid tier) | 🔧 Not tracked yet — a simple counter against the source's daily cap |
+
+None of this requires touching the pipeline logic to add — it's all read off data the app already writes to Mongo. This is the section to extend first if you're evaluating this platform for a KPI dashboard / reporting use case, rather than the interactive triage UI it ships with today.
+
+---
+
+## Adapting this to your organization
+
+The pipeline (scrape → extract → embed → score → LLM report) is generic. Everything that makes it *about Yazaki specifically* lives in a small, fixed set of plain-text/config files — none of it is hardcoded in `backend/app/services/` or `backend/app/routers/`. To repoint the whole platform at a different company or industry, this is the complete list of what to touch:
+
+| File | What it defines | Effort to replace |
+|---|---|---|
+| `backend/app/keywords.py` | Search terms per language — company names, competitors, ports/logistics terms, disruption-signal phrases | Rewrite the lists; keep the per-language + exclude-words structure |
+| `backend/app/yazaki_tree_id_map.json` + `embed_tree_labels.py` | The relevance taxonomy (root → categories → leaf entities) and its per-language embeddings | Redefine the tree's structure/labels, then re-run `embed_tree_labels.py` once to compute new embeddings — no manual vector work |
+| `backend/app/llm_insight_business_logic.md` | The LLM's rules for judging relevance and filling out a report card, including any company-context primer | Rewrite in plain English/Markdown — no code, no prompt-engineering framework |
+| `backend/app/llm_insight_sap_attributes.md` | The strict list of "operational parameters" (SAP fields in the reference config) the LLM is allowed to cite | Swap for your own domain's field list — SAP-specific naming isn't required by anything downstream, it's just what the reference config models |
+| `PINECONE_INDEX_NAME`, `MONGO_DB_NAME` | The vector index and database name (currently `yazaki`/`yazaki_news`) | Rename freely — referenced from `.env`/config, not hardcoded elsewhere |
+
+Everything else — the FastAPI backend, the Streamlit dashboard, the extraction/embedding/scoring/report background jobs, the Docker Compose setup — is domain-agnostic and untouched by a re-target. The current repo state still carries the Yazaki name in a few identifiers (directory/collection/index names) as an artifact of the reference deployment it was built against; stripping those is a renaming pass, not a re-architecture.
 
 ---
 
@@ -75,9 +115,9 @@ flowchart LR
 | Content extraction | Playwright + trafilatura | Loads each article in a headless browser and pulls out its main text |
 | Embedding model | [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) via `sentence-transformers` | Turns article-text chunks into 1024-dimensional vectors, CPU inference, no LangChain |
 | Vector store | [Pinecone](https://www.pinecone.io) | Stores and indexes chunk embeddings (index name: `yazaki`, cosine metric); also the source the scorer reads chunk vectors back from |
-| Relevance tree | `backend/app/yazaki_tree_id_map.json` | A hand-built taxonomy of ~130 nodes (Automotive Industry → OEMs → specific manufacturers, ports, logistics, etc.), each with a per-language embedding and a similarity threshold |
+| Relevance tree | `backend/app/yazaki_tree_id_map.json` | A hand-built, fully swappable taxonomy — shipped as ~155 nodes for the Yazaki reference config (Automotive Industry → OEMs → specific manufacturers, ports, logistics, etc.) — each node with a per-language embedding and a similarity threshold |
 | Insight LLM | [Qwen2.5-7B-Instruct](https://ollama.com/library/qwen2.5) (`q4_K_M`) via [Ollama](https://ollama.com) | Translates non-English articles and produces the structured daily insight assessments; runs in its own container, CPU inference, model auto-downloaded on first start into a local cache |
-| Business logic | `backend/app/llm_insight_business_logic.md` + `llm_insight_sap_attributes.md` | Human-authored rules fed to the LLM — how to judge supply-chain relevance and the strict list of valid SAP parameters it may cite |
+| Business logic | `backend/app/llm_insight_business_logic.md` + `llm_insight_sap_attributes.md` | Human-authored, plain-Markdown rules fed to the LLM — how to judge relevance and the strict list of valid operational parameters it may cite; entirely content, no code, to retarget |
 | Orchestration | Docker Compose | Runs all services together with one command; database sync between machines is a separate, explicit opt-in step (see [Syncing the database](#syncing-the-database-between-machines)) |
 
 ---
@@ -263,11 +303,11 @@ While a run is active, the overview bar shows a progress bar and an ETA, and the
 
 ## Relativity scoring
 
-Not every article that matches a keyword is actually relevant to Yazaki's business — a wire-service story that happens to mention "Renault" once is not the same as a piece about Renault's EV platform strategy. Relativity scoring is a **0–100 score, computed per article**, that captures the difference — the score every article is ranked by in the dashboard.
+Not every article that matches a keyword is actually relevant — a wire-service story that happens to mention a tracked name once is not the same as a piece substantively about it (in the reference config: a story that merely mentions "Renault" vs. one about Renault's EV platform strategy). Relativity scoring is a **0–100 score, computed per article**, that captures the difference — the score every article is ranked by in the dashboard.
 
 ### The relevance tree
 
-`backend/app/yazaki_tree_id_map.json` is a hand-built taxonomy — roughly 130 nodes rooted under things like *Automotive Industry*, branching down through *OEM & Vehicle Manufacturing*, *Electric & Hybrid Vehicle Transition*, *Automotive Wiring Competitors* (Yazaki's actual competitors), ports, and logistics. Every node has:
+`backend/app/yazaki_tree_id_map.json` is a hand-built taxonomy — roughly 155 nodes rooted under things like *Automotive Industry*, branching down through *OEM & Vehicle Manufacturing*, *Electric & Hybrid Vehicle Transition*, *Automotive Wiring Competitors* (Yazaki's actual competitors), ports, and logistics. Every node has:
 - A label in each of the three languages (`en`/`fr`/`ar`)
 - A **per-language embedding** of that label (computed once by `embed_tree_labels.py`)
 - A **similarity threshold** (default `0.4`) — how close a chunk's embedding must be, in cosine similarity, to count as a match
@@ -297,7 +337,7 @@ Each article has a `scored_status`, mirroring the other jobs:
 Every scored article gets two feedback buttons plus a rescore button:
 
 - **👍 More** / **👎 Less** — tells the system this article is more, or less, relevant than its score suggests. Each click does two things at once:
-  1. **Nudges the threshold** of every tree node this article's scoring run triggered, scaled by how much of the article actually supported that node (a node backed by 8 of 10 chunks moves close to the full step; one backed by a single stray chunk barely moves at all). These nudges are stored as overrides in a `node_threshold_overrides` Mongo collection — not written into the tree file itself — so they apply to every future scoring run without ever touching the ~130-node source file. *(This mostly shapes how future/other articles score; a small threshold shift rarely flips a similarity that was already well clear of the line.)*
+  1. **Nudges the threshold** of every tree node this article's scoring run triggered, scaled by how much of the article actually supported that node (a node backed by 8 of 10 chunks moves close to the full step; one backed by a single stray chunk barely moves at all). These nudges are stored as overrides in a `node_threshold_overrides` Mongo collection — not written into the tree file itself — so they apply to every future scoring run without ever touching the ~155-node source file. *(This mostly shapes how future/other articles score; a small threshold shift rarely flips a similarity that was already well clear of the line.)*
   2. **Directly adjusts this article's own score** by ±5 points (`relativity_score_adjustment`, clamped so the final score stays in 0–100) — the part that guarantees the number you're looking at actually moves. This adjustment is remembered and re-applied every time the article is rescored, including in a full bulk run, so it's never silently lost.
 - **🔄 Rescore** — re-runs scoring for just this one article against the tree as it currently stands (including any threshold overrides *other* articles' feedback has accumulated, and this article's own existing adjustment) — no feedback given, nothing changed. Useful after the tree has moved since this article was last scored.
 
@@ -312,7 +352,7 @@ Click **"See more"** on any article to open a dedicated page (no visible page-sw
 
 ## Daily insight reports (local LLM)
 
-Relativity scoring answers *"is this article on-topic?"*. The report stage answers a sharper question: *"does this describe a concrete event that affects a specific supply-chain parameter, and if so, what should we do about it?"* — and writes the answer as a short, structured daily brief. It runs a **local** LLM (Qwen2.5-7B-Instruct via [Ollama](https://ollama.com), quantized `q4_K_M`, ~5.5 GB to run, CPU-only) in its own container — no data leaves the machine, no external LLM API.
+Relativity scoring answers *"is this article on-topic?"*. The report stage answers a sharper question: *"does this describe a concrete event that affects a specific operational parameter, and if so, what should we do about it?"* — and writes the answer as a short, structured daily brief. It runs a **local** LLM (Qwen2.5-7B-Instruct via [Ollama](https://ollama.com), quantized `q4_K_M`, ~5.5 GB to run, CPU-only) in its own container — no data leaves the machine, no external LLM API, which matters if the source articles or the business rules you feed it are sensitive.
 
 ### The Reports calendar
 
@@ -352,8 +392,10 @@ For the chosen day, the job:
 
 Two Markdown files, fed to the model alongside each article, are the editable "brain" of this stage — no code change needed to tune its judgment:
 
-- **`backend/app/llm_insight_business_logic.md`** — how to decide relevance, how to classify a disruption (Port Congestion / Total Blockade / Capacity Change), how to reason about SAP impact (including the MRP backward-scheduling logic), how to set `confidence`, and worked examples. `concerned_param` stays a single field even for dual-impact events (e.g. a blockade *threat* that's between a delay and a closure); the `recommended_action` sentence carries the nuance a single field can't.
-- **`backend/app/llm_insight_sap_attributes.md`** — the strict, authoritative list of SAP parameters the model is allowed to cite (e.g. `MARC-PLIFZ` planned delivery time, `MARC-EISBE` safety stock, `EORD-FLIFN` source-list block, plus outbound `VBEP`/`LIKP`/`VBAK`). Anything not on this list is off-limits — an event with no matching parameter comes back "not relevant" rather than being force-fit onto the wrong field.
+- **`backend/app/llm_insight_business_logic.md`** — how to decide relevance, how to classify a disruption (Port Congestion / Total Blockade / Capacity Change), how to reason about SAP impact (including the MRP backward-scheduling logic), how to set `confidence`, and worked examples. It also carries a **company-context primer** (who Yazaki/Y-EMEA is: ~45,000 employees, ~18 EMEA plants — Morocco, Tunisia, Egypt, Turkey, Bulgaria, Portugal, Romania, Serbia, Ukraine — their ports, confirmed OEM customers, and key inbound suppliers/logistics providers) so the model recognizes when a named place or company actually touches Yazaki's supply chain, rather than relying on the article alone. `concerned_param` stays a single field even for dual-impact events (e.g. a blockade *threat* that's between a delay and a closure); the `recommended_action` sentence carries the nuance a single field can't. Four MRP parameters are called out as the ones that dominate in practice — `MARC-PLIFZ` (planned delivery time, transit delays), `MARC-WEBAZ` (goods-receipt processing time — the ship arrives on time but the material is stuck at customs/the gate), `MARC-SHZET` (safety time — delivery *reliability*, not just lead time, moving), and `MARC-MRPPP` (planning cycle — the ordering/sailing rhythm itself changing).
+- **`backend/app/llm_insight_sap_attributes.md`** — the strict, authoritative list of SAP parameters the model is allowed to cite (currently `MARC-PLIFZ`, `MARC-EISBE`, `EKPO-ETFZ`, `EORD-FLIFN`, plus outbound `VBEP`/`LIKP`/`VBAK`). Anything not on this list is off-limits — an event with no matching parameter comes back "not relevant" rather than being force-fit onto the wrong field.
+
+  > ⚠️ **Known gap:** the business-logic doc above now describes `MARC-WEBAZ`, `MARC-SHZET`, and `MARC-MRPPP` as the most influential parameters, but they aren't in this attribute list yet — since the model is strictly limited to what's listed here, it currently **cannot** select any of the three, no matter how well an article matches them. Add them to `llm_insight_sap_attributes.md` before relying on that guidance.
 
 Edit these two files to change what the reports flag and how — extend the SAP list, add few-shot examples, refine the classification rules.
 
@@ -361,7 +403,7 @@ Edit these two files to change what the reports flag and how — extend the SAP 
 
 ## Configuration
 
-**Keywords** — edit `backend/app/keywords.py` to add or remove search terms. Each language (`en`, `fr`, `ar`) has its own list, since company names need to be transliterated (not just translated) to actually match Arabic-language headlines — e.g. Renault appears as "رينو", not "Renault".
+**Keywords** — edit `backend/app/keywords.py` to add or remove search terms. Each language (`en`, `fr`, `ar`) has its own list, since company names need to be transliterated (not just translated) to actually match Arabic-language headlines — e.g. Renault appears as "رينو", not "Renault". Beyond company/port names, the list also includes a **disruption-signal group** per language (e.g. "customs strike", "shipping delay", "plant shutdown") deliberately mapped to the four SAP MRP parameters the report stage cares about most (`PLIFZ`/`WEBAZ`/`SHZET`/`MRPPP` — see [Daily insight reports](#daily-insight-reports-local-llm)), so the kind of event that actually moves those fields is more likely to be caught at ingestion, not just at LLM-assessment time.
 
 **Scrape window** — the first-ever run defaults to the last 7 days. Adjust `DEFAULT_DAYS_BACK` in `backend/app/services/scraper.py` to change this.
 

@@ -35,6 +35,9 @@ KEYWORDS_BY_LANGUAGE = {
         "Leoni",
         "Aptiv",
         "Lear Corporation",
+        "Motherson",
+        "Kromberg & Schubert",
+        "Draexlmaier",
 
         # Raw material & equipment suppliers
         "Coficab",
@@ -44,6 +47,7 @@ KEYWORDS_BY_LANGUAGE = {
         "DB Schenker",
 
         # OEM clients
+        "BMW",
         "Renault",
         "Dacia",
         "Stellantis",
@@ -70,9 +74,22 @@ KEYWORDS_BY_LANGUAGE = {
         "Tanger Free Zone",
         "Tangier Automotive City",
 
-        # Ports & shipping routes
+        # Ports & shipping routes (each port serves at least one EMEA plant:
+        # Tanger Med/Casablanca -> Morocco, Leixoes -> Portugal, Burgas/
+        # Varna -> Bulgaria, Constanta -> Romania, Alexandria -> Egypt,
+        # Rades -> Tunisia, Istanbul -> Turkey)
         "Tanger Med",
         "Tanger port",
+        "Casablanca port",
+        "Algeciras",
+        "Strait of Gibraltar",
+        "Leixoes port",
+        "Burgas port",
+        "Varna port",
+        "Constanta port",
+        "Alexandria port",
+        "Rades port",
+        "Istanbul port",
         "Shanghai port",
         "Suez Canal",
         "Red Sea",
@@ -86,6 +103,26 @@ KEYWORDS_BY_LANGUAGE = {
         "automotive industry",
         "electric vehicle",
         "semiconductor shortage",
+        "auto tariffs",
+
+        # Disruption signals mapped to the four most influential SAP MRP
+        # parameters for Yazaki's plants:
+        # MARC-PLIFZ (planned delivery time) — transit/shipping delays
+        "shipping delay",
+        "freight delay",
+        "transit time",
+        "ferry disruption",
+        # MARC-WEBAZ (goods receipt processing time) — customs & port handling
+        "customs clearance",
+        "customs inspection",
+        "customs strike",
+        # MARC-SHZET (safety time) — supply variability & reliability
+        "supply disruption",
+        "logistics disruption",
+        # MARC-MRPPP (planning cycle) — plant operating calendar changes
+        "production halt",
+        "plant shutdown",
+        "factory closure",
 
         # Macroeconomic & commodities
         "copper price",
@@ -110,6 +147,9 @@ KEYWORDS_BY_LANGUAGE = {
         "Leoni",
         "Aptiv",
         "Lear Corporation",
+        "Motherson",
+        "Kromberg & Schubert",
+        "Draexlmaier",
 
         "Coficab",
         "Nexans",
@@ -117,6 +157,7 @@ KEYWORDS_BY_LANGUAGE = {
         "Schleuniger",
         "DB Schenker",
 
+        "BMW",
         "Renault",
         "Dacia",
         "Stellantis",
@@ -144,6 +185,16 @@ KEYWORDS_BY_LANGUAGE = {
 
         "Tanger Med",
         "port de Tanger",
+        "port de Casablanca",
+        "Algésiras",
+        "détroit de Gibraltar",
+        "port de Leixoes",
+        "port de Bourgas",
+        "port de Varna",
+        "port de Constanta",
+        "port d'Alexandrie",
+        "port de Radès",
+        "port d'Istanbul",
         "port de Shanghai",
         "canal de Suez",
         "mer Rouge",
@@ -156,6 +207,24 @@ KEYWORDS_BY_LANGUAGE = {
         "industrie automobile",
         "véhicule électrique",
         "pénurie de semi-conducteurs",
+        "droits de douane",
+
+        # Signaux de disruption liés aux quatre paramètres SAP clés :
+        # MARC-PLIFZ — délais de transit/livraison
+        "retard de livraison",
+        "retard maritime",
+        "délai de transit",
+        "liaison maritime suspendue",
+        # MARC-WEBAZ — douane & manutention portuaire
+        "dédouanement",
+        "contrôle douanier",
+        "grève des douanes",
+        # MARC-SHZET — fiabilité de l'approvisionnement
+        "rupture d'approvisionnement",
+        "perturbation logistique",
+        # MARC-MRPPP — calendrier de production
+        "arrêt de production",
+        "fermeture d'usine",
 
         "prix du cuivre",
 
@@ -176,6 +245,9 @@ KEYWORDS_BY_LANGUAGE = {
         "ليوني",                     # Leoni
         "أبتيف",                     # Aptiv
         "لير",                       # Lear Corporation
+        "موذرسون",                   # Motherson
+        "كرومبرغ",                   # Kromberg & Schubert
+        "دراكسلماير",                # Draexlmaier
 
         "كوفيكاب",                   # Coficab
         "نيكسانس",                   # Nexans
@@ -183,6 +255,7 @@ KEYWORDS_BY_LANGUAGE = {
         "شلوينيغر",                  # Schleuniger
         "شينكر",                     # DB Schenker
 
+        "بي إم دبليو",               # BMW
         "رينو",                      # Renault
         "داسيا",                     # Dacia
         "ستيلانتيس",                 # Stellantis
@@ -210,6 +283,11 @@ KEYWORDS_BY_LANGUAGE = {
 
         "ميناء طنجة المتوسط",        # Tanger Med
         "ميناء طنجة",                # Tanger port
+        "ميناء الدار البيضاء",       # Casablanca port
+        "الجزيرة الخضراء",           # Algeciras
+        "مضيق جبل طارق",             # Strait of Gibraltar
+        "ميناء الإسكندرية",          # Alexandria port (serves Yazaki Egypt)
+        "ميناء رادس",                # Rades port (serves Yazaki Tunisia)
         "ميناء شنغهاي",              # Shanghai port
         "قناة السويس",               # Suez Canal
         "البحر الأحمر",              # Red Sea
@@ -222,6 +300,21 @@ KEYWORDS_BY_LANGUAGE = {
         "صناعة السيارات",            # automotive industry
         "السيارات الكهربائية",       # electric vehicle
         "نقص أشباه الموصلات",        # semiconductor shortage
+        "الرسوم الجمركية",           # customs tariffs
+
+        # Disruption signals mapped to the four key SAP parameters:
+        # MARC-PLIFZ — transit/delivery delays
+        "تأخير الشحن",               # shipping delay
+        "تأخير التسليم",             # delivery delay
+        # MARC-WEBAZ — customs & port handling
+        "التخليص الجمركي",           # customs clearance
+        "تفتيش جمركي",               # customs inspection
+        "إضراب الجمارك",             # customs strike
+        # MARC-SHZET — supply reliability
+        "اضطراب الإمدادات",          # supply disruption
+        # MARC-MRPPP — plant operating calendar changes
+        "توقف الإنتاج",              # production halt
+        "إغلاق مصنع",                # factory closure
 
         "سعر النحاس",                # copper price
 
@@ -240,7 +333,7 @@ KEYWORDS_BY_LANGUAGE = {
 # dropped entirely. Keyed by language, since an English exclude word can't
 # filter a French or Arabic title.
 EXCLUDE_WORDS_BY_LANGUAGE = {
-    "en": ["job", "hiring", "recruitment"],
-    "fr": ["emploi", "recrutement", "offre d'emploi"],
-    "ar": ["وظيفة", "توظيف"],
+    "en": ["job", "hiring", "recruitment", "vacancy", "internship"],
+    "fr": ["emploi", "recrutement", "offre d'emploi", "embauche", "stage"],
+    "ar": ["وظيفة", "توظيف", "تدريب مهني"],
 }

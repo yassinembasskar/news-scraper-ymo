@@ -88,7 +88,7 @@ FEEDBACK_THRESHOLD_MAX = 0.9
 
 @lru_cache(maxsize=1)
 def _load_tree() -> dict:
-    """127 nodes, keyed by node_id, each with parent/depth/labels/
+    """~144 nodes, keyed by node_id, each with parent/depth/labels/
     embeddings (per-language)/threshold. Cached — it's a static file."""
     with open(TREE_PATH, encoding="utf-8") as f:
         return json.load(f)

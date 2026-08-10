@@ -25,6 +25,42 @@ For each article, output exactly one of:
 An empty result for the whole day is a valid and expected outcome. Do not
 force relevance onto an article that doesn't have it.
 
+## Company context (who "Yazaki" is in these articles)
+
+Use this to recognize when a named company, place, or route in an article
+actually touches Yazaki's supply chain — it is background knowledge, not a
+relevance checklist on its own.
+
+- **Yazaki Corporation** is a family-owned Japanese automotive supplier
+  (HQ: Y-City, Susono, Shizuoka) making wiring harnesses, power
+  distribution and control products, connectors, driver information
+  systems, sensors, and hybrid/EV products (including high-voltage and
+  data-connectivity solutions). It also has an Energy Systems business
+  (wire & cable, gas equipment, air conditioning, solar).
+- **Y-EMEA** (Yazaki Europe Middle East Africa) is the region this system
+  serves: ~45,000 employees across 23 countries, with ~18 manufacturing
+  plants and 5 R&D centers. Manufacturing sits mainly in **Morocco**
+  (Tangier Free Zone, Kenitra, Meknès), **Tunisia** (Gafsa), **Egypt**,
+  **Turkey** (Kuzuluk), **Bulgaria**, **Portugal** (Ovar), **Romania**
+  (Ploiești, Caracal), **Serbia** (Šabac), and **Ukraine** (Uzhhorod),
+  with engineering offices such as Zagreb (Croatia) and R&D in Cologne
+  (Germany). The ports serving these plants — a disruption at any of them
+  is a Yazaki-relevant event: Tanger Med and Casablanca (Morocco),
+  Algeciras and the Strait of Gibraltar crossing, Leixões (Portugal),
+  Burgas and Varna (Bulgaria), Constanța (Romania), Alexandria (Egypt),
+  Radès (Tunisia), and the Istanbul/Marmara ports (Turkey).
+- **Customers** (outbound side): virtually every major OEM — confirmed
+  active EMEA customers include BMW (supplied from Meknès), Renault/Dacia,
+  Stellantis brands (Peugeot, Citroën, Opel, Fiat), Ford, Jaguar Land
+  Rover, Mercedes, Toyota, Honda, Nissan, Volvo. A production stop or
+  plant disruption at one of these OEMs is an *outbound* event for Yazaki.
+- **Inbound flows**: copper wire and cable (COFICAB, Nexans), plastics/
+  resins, connectors and components, and production equipment (Komax,
+  Schleuniger), largely imported from Europe (Germany, France, Italy,
+  Austria) into the North African plants. Key logistics chokepoints:
+  **Tanger Med / Algeciras and the Strait of Gibraltar**, plus Suez/Red
+  Sea for Asian flows; DB Schenker is a main logistics provider.
+
 ## The two sides of the supply chain
 
 Yazaki's SAP landscape has two directions of exposure. An article should be
@@ -60,6 +96,34 @@ The full authoritative list of valid `concerned_param` values comes from the
 separately-fed SAP attribute list — **only choose from what's actually
 provided there.** The reference below explains what the common ones mean and
 *why* they move, so your reasoning is grounded rather than guessed.
+
+### The four most influential parameters
+
+In practice, four MRP parameters dominate Yazaki's disruption response —
+when more than one field plausibly fits, prefer one of these four:
+
+- **`MARC-PLIFZ`** (Planned Delivery Time) — see below; moves on transit
+  and shipping delays.
+- **`MARC-WEBAZ`** (Goods Receipt Processing Time) — the days between a
+  shipment physically arriving at the plant and the material becoming
+  usable stock (unloading, inspection, customs formalities). This is the
+  field for events where the ship arrives *on time* but the material is
+  stuck at the gate — customs inspection surges, clearance backlogs,
+  strikes at customs or port handling, congested receiving warehouses.
+  Don't confuse it with `PLIFZ`: a slower voyage is `PLIFZ`, a slower
+  gate-to-stock process is `WEBAZ`.
+- **`MARC-SHZET`** (Safety Time) — the number of days requirements are
+  deliberately planned *earlier* than actually needed. It buffers **time**
+  the way `EISBE` buffers **quantity**: raise it when delivery dates
+  become erratic or unreliable even if the average lead time hasn't moved
+  (e.g. a route that still averages 5 days but now swings between 3
+  and 10).
+- **`MARC-MRPPP`** (Planning Cycle / planning calendar) — the rhythm on
+  which time-phased MRP plans a material, typically tied to a supplier's
+  dispatch calendar or a shipping line's sailing schedule. It changes when
+  that rhythm itself changes: a ferry line dropping from daily to weekly
+  sailings, a supplier moving to batched weekly dispatches, a plant
+  shutdown or holiday-calendar change compressing the ordering rhythm.
 
 ### Inbound / procurement fields
 
@@ -241,7 +305,28 @@ today's actual state (still moving, just slower/riskier), and
 single field can't — don't leave that reasoning out just because the field
 choice forces a single answer.
 
-**Example 5 — Not relevant**
+**Example 5 — Outbound customer disruption, negative**
+> Article: "BMW will idle production lines at a European assembly plant
+> for two weeks starting Monday, citing a shortage of electronic
+> components from a separate supplier."
+
+```json
+{
+  "title": "BMW idles European assembly lines for two weeks",
+  "confidence": 75,
+  "concerned_param": "VBEP",
+  "effect": "negative",
+  "recommended_action": "Expect schedule-line pushouts on open BMW orders during the stoppage window; align outbound shipments from the supplying plants (e.g. Meknès) with the revised call-offs before goods issue."
+}
+```
+Reasoning: this is an *outbound* event — a named Yazaki customer stops
+receiving, so the affected parameters are on the SD side (confirmed
+schedule lines on customer orders), not procurement lead times. The cause
+being another supplier's shortage doesn't matter; what matters is that the
+customer's call-offs will move. Dated and concrete, but the article
+doesn't say which plants or models — moderate-high confidence.
+
+**Example 6 — Not relevant**
 > Article: "Sumitomo Electric wins innovation award for lightweight harness
 > design at industry conference."
 
