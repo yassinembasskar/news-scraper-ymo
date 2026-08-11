@@ -13,7 +13,7 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field, HttpUrl
 
-IngestionStatus = Literal["No Extraction", "Pending", "Successful", "Failed", "Expired"]
+IngestionStatus = Literal["No Extraction", "Pending", "Successful", "Failed", "Expired", "Archived"]
 EmbeddingStatus = Literal["Not Embedded", "Pending", "Embedded", "Failed", "Expired"]
 ScoredStatus = Literal["Not Scored", "Pending", "Scored", "Failed"]
 TranslationStatus = Literal["Not Translated", "Translated", "Failed"]

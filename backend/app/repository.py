@@ -110,11 +110,21 @@ def upsert_article(article: ArticleCreate) -> bool:
     return result.upserted_id is not None
 
 
+def article_exists(url: str) -> bool:
+    """Cheap existence check by URL — lets the scraper skip the title-gate
+    LLM call for a URL it's already seen (only genuinely new articles need
+    gating; re-running it on a duplicate would be wasted CPU/time and
+    couldn't change the stored article's status anyway, since
+    ingestion_status is only ever set on insert)."""
+    return articles.find_one({"url": url}, {"_id": 1}) is not None
+
+
 def get_articles(
     language: Optional[str] = None,
     keyword: Optional[str] = None,
     date_from: Optional[datetime] = None,
     date_to: Optional[datetime] = None,
+    include_archived: bool = False,
 ) -> List[ArticleOut]:
     """Returns articles matching the given filters, newest first.
     Any filter left as None is simply not applied.
@@ -124,8 +134,17 @@ def get_articles(
     against matched_keywords (the tag recorded at scrape time for whichever
     search term originally found the article). This means the filter finds
     the keyword anywhere it actually appears in the article, not just
-    articles that happen to have been tagged with it as an exact keyword."""
+    articles that happen to have been tagged with it as an exact keyword.
+
+    include_archived=False (the default) excludes ingestion_status ==
+    "Archived" articles — the title-gate LLM decided at scrape time these
+    couldn't plausibly affect the tracked business, so they never reach
+    extraction and stay out of the default list. Pass True to audit them
+    (e.g. checking for false negatives)."""
     query: dict = {}
+
+    if not include_archived:
+        query["ingestion_status"] = {"$ne": "Archived"}
 
     if language:
         query["language"] = language
@@ -575,6 +594,7 @@ def log_scrape_run(
     excluded_articles: int,
     malformed_articles: int,
     errors: List[str],
+    archived_articles: int = 0,
 ) -> None:
     """Appends a permanent record of one scrape run to the scrape_runs
     collection. Unlike the `meta` document (overwritten every run), this is
@@ -588,6 +608,7 @@ def log_scrape_run(
         "duplicate_articles": duplicate_articles,
         "excluded_articles": excluded_articles,
         "malformed_articles": malformed_articles,
+        "archived_articles": archived_articles,
         "errors": errors,
         "logged_at": datetime.now(timezone.utc),
     })

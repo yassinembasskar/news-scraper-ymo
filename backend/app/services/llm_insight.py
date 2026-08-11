@@ -3,8 +3,16 @@ LLM Insight client — the reusable core of the daily-report (Stage 5)
 pipeline, extracted from the scratch validation done during that stage's
 design.
 
-Two functions, both hitting the containerized Ollama service
+Three functions, all hitting the containerized Ollama service
 (qwen2.5:7b-instruct-q4_K_M) over HTTP:
+  - gate_title(): a fast, title-only pre-filter run by the scraper right
+    after a new article is found, before the (expensive) extraction step —
+    "could this headline plausibly concern anything this deployment
+    tracks?" Deliberately shallow (short prompt, small context, no
+    business-logic doc) so it stays cheap on CPU; biased to say yes when
+    unsure, since a false negative here means the article is archived and
+    never reaches extraction/scoring/reports at all. The careful judgment
+    still happens later, on full text, in relativity scoring and assess().
   - translate_to_english(): translates a non-English article to English,
     because testing showed the model reliably judges relevance in English
     but silently misses the same clearly-relevant event when it's in Arabic
@@ -83,6 +91,26 @@ _TRANSLATION_SCHEMA = {
     "required": ["title", "body"],
 }
 
+_GATE_SCHEMA = {
+    "type": "object",
+    "properties": {"relevant": {"type": "boolean"}},
+    "required": ["relevant"],
+}
+
+# Title + the (short, no entity list) gate prompt is well under 200 tokens;
+# far below the 8192 the full assess()/translate calls need for a whole
+# article + the business-logic doc, so the gate call's KV-cache stays small
+# and fast.
+_GATE_NUM_CTX = 1024
+
+_GATE_PROMPT = (
+    "You are a relevance filter for a business news monitoring system. "
+    "Judge whether this headline could affect: (1) a supply chain or "
+    "logistics business, (2) the automotive industry, or (3) businesses in "
+    "general. Be loose — only answer no if it's clearly unrelated (e.g. "
+    "sports, entertainment, personal news). Respond with the required JSON only."
+)
+
 
 @lru_cache(maxsize=1)
 def _system_prompt() -> str:
@@ -94,7 +122,7 @@ def _system_prompt() -> str:
     return f"{business_logic}\n\n## SAP attribute list (authoritative)\n\n{sap_attributes}"
 
 
-def _chat(messages: list, fmt=None, temperature: float = 0.2) -> str:
+def _chat(messages: list, fmt=None, temperature: float = 0.2, num_ctx: int = 8192) -> str:
     """One Ollama /api/chat call, non-streaming. Returns the assistant
     message content string. Raises on HTTP error (the caller decides
     whether one article's failure aborts the run — it doesn't)."""
@@ -102,7 +130,7 @@ def _chat(messages: list, fmt=None, temperature: float = 0.2) -> str:
         "model": settings.ollama_model,
         "messages": messages,
         "stream": False,
-        "options": {"num_ctx": 8192, "temperature": temperature},
+        "options": {"num_ctx": num_ctx, "temperature": temperature},
     }
     if fmt is not None:
         payload["format"] = fmt
@@ -136,6 +164,41 @@ def translate_to_english(title: str, content: str) -> Tuple[str, str]:
     )
     parsed = json.loads(raw)
     return parsed.get("title", title), parsed.get("body", content)
+
+
+def gate_title(title: str, language: str) -> bool:
+    """Fast, title-only relevance pre-filter — see the module docstring.
+    Returns True (keep, proceed to extraction) or False (archive, skip
+    extraction). Raises on HTTP error, same as the other functions here;
+    the caller decides how to handle that (the scraper fails open rather
+    than lose an article to a transient LLM/Ollama hiccup).
+
+    One static English-language prompt for every article language, no
+    translation and deliberately no tracked-entity list — both were tried
+    against the same real 20-article sample and did worse. An entity list
+    (first keywords.py's company names, then the relevance tree's ~155
+    topic labels) anchored the model too narrowly: it missed "Thai Honda
+    holds prices amid cost pressures" and two "ship sinks in the Red Sea
+    after attack" headlines, because "Red Sea"/"Suez Canal" happen not to be
+    tree node labels even though they're tracked search keywords. Dropping
+    the entity list and trusting the model's own judgment on the three
+    categories below fixed every one of those misses with no new false
+    positives on the sports/celebrity/personal-news noise (8/20 relevant vs.
+    3/20 with either entity list, same 20 real articles). Translating
+    non-English titles first was tried too and was both slower (reuses the
+    full 8192-context call) and less accurate (a real mistranslation —
+    "أوبل"/Opel became "Oblig" and was then missed) than judging the
+    original-language title directly, which is what this does."""
+    raw = _chat(
+        messages=[
+            {"role": "system", "content": _GATE_PROMPT},
+            {"role": "user", "content": title},
+        ],
+        fmt=_GATE_SCHEMA,
+        num_ctx=_GATE_NUM_CTX,
+    )
+    parsed = json.loads(raw)
+    return bool(parsed.get("relevant", True))
 
 
 def assess(title: str, content: str) -> List[dict]:

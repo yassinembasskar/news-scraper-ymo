@@ -28,6 +28,11 @@ def list_articles(
     keyword: Optional[str] = Query(None, description="Filter by a single matched keyword, e.g. 'Renault'"),
     date_from: Optional[datetime] = Query(None, description="Only articles published on or after this date"),
     date_to: Optional[datetime] = Query(None, description="Only articles published on or before this date"),
+    include_archived: bool = Query(
+        False,
+        description="Include articles the title-gate LLM archived (deemed unable to affect the tracked business, "
+        "so never extracted). Off by default.",
+    ),
 ):
     """Returns articles matching the given filters, newest first. Any
     filter left unset is simply not applied."""
@@ -36,6 +41,7 @@ def list_articles(
         keyword=keyword,
         date_from=date_from,
         date_to=date_to,
+        include_archived=include_archived,
     )
 
 

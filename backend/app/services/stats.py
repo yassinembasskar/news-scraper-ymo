@@ -121,7 +121,13 @@ def get_pipeline_stats() -> dict:
         "extraction": {
             "total": total_articles,
             "successful": extraction_counts.get("Successful", 0),
-            "failed": extraction_counts.get("Failed", 0),
+            # Archived articles (the title gate decided they can't affect the
+            # tracked business) are folded in here rather than shown as their
+            # own bucket: from extraction's point of view, an archived
+            # article will never be extracted — the same practical outcome
+            # as a failed one, just decided earlier and for a different
+            # reason (relevance, not a paywall/timeout/layout failure).
+            "failed": extraction_counts.get("Failed", 0) + extraction_counts.get("Archived", 0),
             "expired": extraction_counts.get("Expired", 0),
             "not_extracted": extraction_counts.get("No Extraction", 0),
             "pending": extraction_counts.get("Pending", 0),

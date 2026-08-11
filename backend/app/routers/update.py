@@ -30,6 +30,7 @@ class ScrapeSummaryResponse(BaseModel):
     duplicate_articles: int = 0
     excluded_articles: int = 0
     malformed_articles: int = 0
+    archived_articles: int = 0
     errors: List[str] = []
 
 
