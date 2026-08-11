@@ -76,7 +76,7 @@ The pipeline (scrape → extract → embed → score → LLM report) is generic.
 | `backend/app/llm_insight_sap_attributes.md` | The strict list of "operational parameters" (SAP fields in the reference config) the LLM is allowed to cite | Swap for your own domain's field list — SAP-specific naming isn't required by anything downstream, it's just what the reference config models |
 | `PINECONE_INDEX_NAME`, `MONGO_DB_NAME` | The vector index and database name (currently `yazaki`/`yazaki_news`) | Rename freely — referenced from `.env`/config, not hardcoded elsewhere |
 
-Everything else — the FastAPI backend, the Streamlit dashboard, the extraction/embedding/scoring/report background jobs, the Docker Compose setup — is domain-agnostic and untouched by a re-target. The current repo state still carries the Yazaki name in a few identifiers (directory/collection/index names) as an artifact of the reference deployment it was built against; stripping those is a renaming pass, not a re-architecture.
+Everything else — the FastAPI backend, the React dashboard, the extraction/embedding/scoring/report background jobs, the Docker Compose setup — is domain-agnostic and untouched by a re-target. The current repo state still carries the Yazaki name in a few identifiers (directory/collection/index names) as an artifact of the reference deployment it was built against; stripping those is a renaming pass, not a re-architecture.
 
 ---
 
@@ -102,7 +102,7 @@ flowchart LR
     Mongo -->|day's top-scored articles| Reporter["LLM Insight reporter\n(translate + assess)"]
     Reporter <-->|prompt / JSON| Ollama[("Ollama\nQwen2.5-7B")]
     Reporter -->|daily insight report| Mongo
-    Frontend["Streamlit Dashboard"] -->|HTTP requests| Backend
+    Frontend["React Dashboard"] -->|HTTP requests| Backend
     User(("User")) -->|views, clicks, feedback| Frontend
 ```
 
@@ -110,7 +110,7 @@ flowchart LR
 |---|---|---|
 | Database | MongoDB | Stores articles, scrape/extraction/embedding/scoring status + history, relativity-feedback threshold overrides, cached translations, and generated daily reports |
 | Backend | FastAPI (Python) | Scrapes 5 news sources, matches keywords, extracts article content, chunks + embeds content, scores relevance, generates daily LLM reports, exposes a REST API |
-| Frontend | Streamlit (Python) | Interactive dashboard — charts, filters, ranked/color-coded article list, extraction + embedding + scoring controls, per-article detail page, and a daily-report calendar |
+| Frontend | React + TypeScript (Vite, TanStack Query, Tailwind) | Interactive dashboard — charts, filters, ranked/color-coded article list, per-article extraction/embedding/scoring status badges, extraction + embedding + scoring controls with live progress, failed-extraction recovery, per-article detail page, and a daily-report calendar |
 | Data sources | [GNews](https://gnews.io), [NewsAPI.org](https://newsapi.org), [NewsData.io](https://newsdata.io), [Currents](https://currentsapi.services), [TheNewsAPI.com](https://thenewsapi.com) | Five independent news-search APIs, each normalized into a shared shape and merged — see [News sources](#news-sources) |
 | Content extraction | Playwright + trafilatura | Loads each article in a headless browser and pulls out its main text |
 | Embedding model | [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) via `sentence-transformers` | Turns article-text chunks into 1024-dimensional vectors, CPU inference, no LangChain |
@@ -150,16 +150,24 @@ news-scraper-ymo/
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
-├── frontend/
-│   ├── app.py                       # Streamlit entrypoint — thin router (st.navigation, no visible page nav)
-│   ├── config.py                    # Environment settings
-│   ├── api_client.py                # All backend API calls
-│   ├── views/                       # dashboard.py (main page), article_detail.py ("See more" page),
-│   │                                 # reports.py (daily-report calendar)
-│   ├── components/                  # Overview bar (update/extract/embed/score controls + progress),
-│   │                                 # chart, article list (ranking, colored scores, feedback buttons)
-│   ├── requirements.txt
-│   └── Dockerfile
+├── frontend-react/
+│   ├── src/
+│   │   ├── App.tsx                  # Router — Dashboard, ArticleDetail, Reports pages
+│   │   ├── api/                     # client.ts (all backend calls) + types.ts (mirrors backend models)
+│   │   ├── hooks/                   # TanStack Query hooks — useArticles, usePipeline, useReports, useCharts
+│   │   ├── pages/                   # Dashboard.tsx, ArticleDetail.tsx, Reports.tsx
+│   │   ├── components/
+│   │   │   ├── dashboard/           # StatCards, PipelineStageCard, ChartCard, ArticleList,
+│   │   │   │                         # FailedExtractionActions, FeedbackButtons, UpdateButton
+│   │   │   ├── reports/             # CalendarGrid, GenerationBanner, InsightCard
+│   │   │   ├── layout/              # AppShell, Sidebar
+│   │   │   ├── ui/                  # Card, Button, ProgressBar, ProgressRing, Badge
+│   │   │   ├── ScoreBadge.tsx       # Relativity-score badge
+│   │   │   └── StatusBadge.tsx      # Extraction/embedding/scoring status badge
+│   │   └── lib/                     # utils, format, theme
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── Dockerfile                   # Runs the Vite dev server
 ├── docker-compose.yml               # incl. the ollama service + the opt-in ("sync" profile) mongo-restore service
 ├── llm_model/                       # Ollama model cache — machine-local, git-ignored, auto-populated on first run
 └── .gitignore
@@ -216,7 +224,7 @@ news-scraper-ymo/
 
 5. **Open the dashboard:**
    ```
-   http://localhost:8501
+   http://localhost:5174
    ```
 
 ---
@@ -444,7 +452,7 @@ The database isn't a Docker named volume shared across machines — it's local t
 ```bash
 docker compose up --build -d
 ```
-Starts Mongo (with whatever's already in its volume — unchanged unless you explicitly sync), backend, and frontend. Safe to run as often as you like; never touches the database.
+Starts Mongo (with whatever's already in its volume — unchanged unless you explicitly sync), backend, and the React frontend. Safe to run as often as you like; never touches the database.
 
 ### Pulling the latest committed snapshot (explicit, when you actually want it)
 
@@ -490,7 +498,7 @@ docker compose down
 docker compose up --build -d
 
 # Restart just backend/frontend after a code change
-docker compose up --build -d backend frontend
+docker compose up --build -d backend frontend-react
 
 # Explicitly pull the latest committed database snapshot (opt-in, overwrites local data)
 docker compose --profile sync up mongo-restore

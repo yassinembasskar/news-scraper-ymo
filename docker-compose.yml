@@ -135,26 +135,8 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-  frontend:
-    build:
-      context: ./frontend
-    ports:
-      - "8501:8501"
-    environment:
-      # Same reasoning as MONGO_URI above — "backend" is the service name,
-      # resolvable on Compose's internal network; localhost would mean the
-      # frontend container itself.
-      - BACKEND_API_URL=http://backend:8000
-    depends_on:
-      backend:
-        condition: service_healthy
-    restart: unless-stopped
-
-  # New React frontend, built alongside the existing Streamlit `frontend`
-  # service rather than replacing it — both run at once, on different
-  # ports, so the working dashboard stays available the whole time this
-  # is being built out and reviewed. Cut over (and retire `frontend`)
-  # only once this one's confirmed to actually work end to end.
+  # React frontend — the only frontend now (the earlier Streamlit `frontend`
+  # service was retired once this one reached feature parity).
   frontend-react:
     build:
       context: ./frontend-react
