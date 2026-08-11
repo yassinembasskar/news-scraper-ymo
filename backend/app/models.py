@@ -175,9 +175,18 @@ class DailyReport(BaseModel):
     keyed by report_date ("YYYY-MM-DD", UTC). The presence of a document is
     itself the "this day has been processed" signal the calendar reads;
     insights == [] is a valid, fully-processed outcome (nothing relevant
-    that day), distinct from no document at all (never generated)."""
+    that day), distinct from no document at all (never generated).
+
+    `run_status`/`errors` distinguish that genuine "processed, nothing
+    relevant" case from "every article errored out" (e.g. an LLM timeout on
+    slow CPU-only hardware) — without them, both look identical to the
+    frontend: a document with insights == []. Defaulted to "success"/[] so
+    documents written before this field existed still parse.
+    """
     report_date: str
     generated_at: datetime
     articles_processed: int
     relevant_count: int
     insights: List[ReportInsight] = Field(default_factory=list)
+    run_status: Literal["success", "partial", "failed", "stopped"] = "success"
+    errors: List[str] = Field(default_factory=list)

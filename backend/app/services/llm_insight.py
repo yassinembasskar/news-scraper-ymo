@@ -60,10 +60,12 @@ SAP_ATTRIBUTES_PATH = _APP_DIR / "llm_insight_sap_attributes.md"
 # roughly 2000-2600 tokens, leaving comfortable headroom inside 8192.
 MAX_CONTENT_CHARS = 8000
 
-# Long enough for a cold first call (~120s one-time model warm-up on CPU)
-# plus generation; the report job's per-article loop pays that warm-up only
-# once, on the first article of a run.
-REQUEST_TIMEOUT = 300
+# On this hardware (CPU-only, no GPU — see docker-compose.yml's ollama
+# service) a single call was observed taking the full previous 300s budget
+# and still not finishing. 600s gives slow-but-working calls room to
+# actually complete instead of being counted as a failure; a call that's
+# truly stuck still gets killed rather than hanging forever.
+REQUEST_TIMEOUT = 600
 
 _INSIGHT_SCHEMA = {
     "type": "array",

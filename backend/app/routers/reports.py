@@ -38,6 +38,11 @@ class CalendarDay(BaseModel):
     has_report: bool
     relevant_count: int
     articles_processed: int
+    # "success" | "partial" | "failed" | "stopped" — lets the calendar flag
+    # a day that looks "done, nothing relevant" but actually errored out
+    # (e.g. every article's LLM call timed out) rather than genuinely
+    # having no relevant news.
+    run_status: str = "success"
 
 
 class CalendarResponse(BaseModel):
@@ -52,6 +57,11 @@ class DailyReportResponse(BaseModel):
     articles_processed: int = 0
     relevant_count: int = 0
     insights: List[ReportInsight] = []
+    # "success" | "partial" | "failed" | "stopped" — see DailyReport's
+    # docstring. insights == [] alone can't distinguish "ran clean, nothing
+    # relevant" from "every article's LLM call errored out"; this can.
+    run_status: str = "success"
+    errors: List[str] = []
 
 
 class GenerateTriggerResponse(BaseModel):
@@ -91,6 +101,7 @@ def get_calendar(year: int, month: int):
                 has_report=summary is not None,
                 relevant_count=summary["relevant_count"] if summary else 0,
                 articles_processed=summary["articles_processed"] if summary else 0,
+                run_status=summary["run_status"] if summary else "success",
             )
         )
     return CalendarResponse(days=days, min_relativity_score=report_job.MIN_RELATIVITY_SCORE)
@@ -154,6 +165,8 @@ def get_report(report_date: str):
         articles_processed=report.articles_processed,
         relevant_count=report.relevant_count,
         insights=report.insights,
+        run_status=report.run_status,
+        errors=report.errors,
     )
 
 

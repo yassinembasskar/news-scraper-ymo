@@ -539,19 +539,21 @@ def upsert_daily_report(report: DailyReport) -> None:
 
 def get_daily_reports_in_range(start_date: str, end_date: str) -> List[dict]:
     """Returns lightweight summaries ({report_date, relevant_count,
-    articles_processed}) for every generated report whose date falls in
-    [start_date, end_date] inclusive — both "YYYY-MM-DD". Used to paint the
-    calendar's per-day markers without shipping every insight body. ISO date
-    strings sort lexicographically, so a plain string range works."""
+    articles_processed, run_status}) for every generated report whose date
+    falls in [start_date, end_date] inclusive — both "YYYY-MM-DD". Used to
+    paint the calendar's per-day markers without shipping every insight
+    body. ISO date strings sort lexicographically, so a plain string range
+    works."""
     cursor = db[DAILY_REPORTS_COLLECTION].find(
         {"_id": {"$gte": start_date, "$lte": end_date}},
-        {"relevant_count": 1, "articles_processed": 1},
+        {"relevant_count": 1, "articles_processed": 1, "run_status": 1},
     )
     return [
         {
             "report_date": doc["_id"],
             "relevant_count": doc.get("relevant_count", 0),
             "articles_processed": doc.get("articles_processed", 0),
+            "run_status": doc.get("run_status", "success"),
         }
         for doc in cursor
     ]

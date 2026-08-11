@@ -144,15 +144,6 @@ def run_report_generation(report_date: str) -> ReportSummary:
         repository.set_report_progress(total, processed)
         repository.set_report_rate(avg_seconds_per_article)
 
-    report = DailyReport(
-        report_date=report_date,
-        generated_at=datetime.now(timezone.utc),
-        articles_processed=processed,
-        relevant_count=len(insights),
-        insights=insights,
-    )
-    repository.upsert_daily_report(report)
-
     if stopped:
         run_status = "stopped"
     elif failed_count == 0:
@@ -161,6 +152,17 @@ def run_report_generation(report_date: str) -> ReportSummary:
         run_status = "failed"
     else:
         run_status = "partial"
+
+    report = DailyReport(
+        report_date=report_date,
+        generated_at=datetime.now(timezone.utc),
+        articles_processed=processed,
+        relevant_count=len(insights),
+        insights=insights,
+        run_status=run_status,
+        errors=errors,
+    )
+    repository.upsert_daily_report(report)
 
     message = (
         f"Report {run_status} for {report_date}: {len(insights)} relevant "
