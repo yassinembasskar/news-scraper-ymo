@@ -19,6 +19,20 @@ export function formatDateTime(iso: string | null | undefined): string {
   return iso.replace("T", " ").slice(0, 19);
 }
 
+/** Falls back to the article's URL domain when source_name is missing —
+ * happens for every Currents-API article, since that source's response has
+ * no publisher field at all (confirmed against a real response). Not a
+ * real publisher name, just a better-than-blank stand-in ("bbc.co.uk"
+ * instead of "Unknown source"). Strips a leading "www." for readability. */
+export function displaySourceName(sourceName: string | null | undefined, url: string): string {
+  if (sourceName) return sourceName;
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "Unknown source";
+  }
+}
+
 export function formatRelativeOrDate(iso: string | null | undefined): string {
   if (!iso) return "Never";
   const date = new Date(iso);

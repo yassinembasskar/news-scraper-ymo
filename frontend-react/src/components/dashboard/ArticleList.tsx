@@ -3,8 +3,11 @@ import { Link } from "react-router-dom";
 import { ExternalLink, Search, X } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
 import { ScoreBadge } from "@/components/ScoreBadge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { FeedbackButtons } from "./FeedbackButtons";
+import { FailedExtractionActions } from "./FailedExtractionActions";
 import { useArticles } from "@/hooks/useArticles";
+import { displaySourceName } from "@/lib/format";
 import type { ChartBucket } from "@/api/types";
 
 const LANGUAGES = [
@@ -80,32 +83,40 @@ export function ArticleList({
 
       <div className="mt-4 divide-y divide-border">
         {sorted.map((article) => (
-          <div key={article.id} className="flex items-center gap-4 px-5 py-3.5">
-            <div className="min-w-0 flex-1">
-              <Link
-                to={`/articles/${article.id}`}
-                className="line-clamp-1 text-sm font-medium text-ink hover:text-brand"
-              >
-                {article.title}
-              </Link>
-              <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-muted">
-                <span className="uppercase">{article.language}</span>
-                <span>·</span>
-                <span>{article.source_name ?? "Unknown source"}</span>
-                <span>·</span>
-                <span>{new Date(article.published_at).toLocaleDateString()}</span>
-                <a
-                  href={article.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="ml-1 inline-flex items-center text-ink-muted hover:text-brand"
+          <div key={article.id} className="px-5 py-3.5">
+            <div className="flex items-center gap-4">
+              <div className="min-w-0 flex-1">
+                <Link
+                  to={`/articles/${article.id}`}
+                  className="line-clamp-1 text-sm font-medium text-ink hover:text-brand"
                 >
-                  <ExternalLink className="size-3" />
-                </a>
-              </p>
+                  {article.title}
+                </Link>
+                <p className="mt-0.5 flex items-center gap-1.5 text-xs text-ink-muted">
+                  <span className="uppercase">{article.language}</span>
+                  <span>·</span>
+                  <span>{displaySourceName(article.source_name, article.url)}</span>
+                  <span>·</span>
+                  <span>{new Date(article.published_at).toLocaleDateString()}</span>
+                  <a
+                    href={article.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ml-1 inline-flex items-center text-ink-muted hover:text-brand"
+                  >
+                    <ExternalLink className="size-3" />
+                  </a>
+                </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <StatusBadge label="Extraction" status={article.ingestion_status} />
+                  <StatusBadge label="Embedding" status={article.embedding_status} />
+                  <StatusBadge label="Scoring" status={article.scored_status} />
+                </div>
+              </div>
+              <ScoreBadge score={article.relativity_score} scoredStatus={article.scored_status} />
+              <FeedbackButtons articleId={article.id} scoredStatus={article.scored_status} />
             </div>
-            <ScoreBadge score={article.relativity_score} scoredStatus={article.scored_status} />
-            <FeedbackButtons articleId={article.id} scoredStatus={article.scored_status} />
+            {article.ingestion_status === "Failed" && <FailedExtractionActions articleId={article.id} />}
           </div>
         ))}
         {!isLoading && sorted.length === 0 && (

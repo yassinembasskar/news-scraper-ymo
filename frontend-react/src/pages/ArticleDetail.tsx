@@ -2,8 +2,10 @@ import { Link, useParams } from "react-router-dom";
 import { ArrowLeft, ExternalLink, Target } from "lucide-react";
 import { Card, CardBody } from "@/components/ui/Card";
 import { ScoreBadge } from "@/components/ScoreBadge";
+import { StatusBadge } from "@/components/StatusBadge";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { useArticle, useTreeNodes } from "@/hooks/useArticles";
+import { displaySourceName } from "@/lib/format";
 import type { TreeNode, TreeNodesResponse } from "@/api/types";
 
 function nodeLabel(nodeId: string, language: string, tree: TreeNodesResponse): string {
@@ -53,14 +55,26 @@ export default function ArticleDetail() {
           <span>·</span>
           <span>{new Date(article.published_at).toLocaleString()}</span>
           <span>·</span>
-          <span>{article.source_name ?? "Unknown source"}</span>
+          <span>{displaySourceName(article.source_name, article.url)}</span>
           <a href={article.url} target="_blank" rel="noreferrer" className="ml-1 inline-flex items-center gap-1 text-brand">
             Original article <ExternalLink className="size-3" />
           </a>
         </p>
-        <div className="mt-3">
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           <ScoreBadge score={article.relativity_score} scoredStatus={article.scored_status} className="text-sm" />
+          <StatusBadge label="Extraction" status={article.ingestion_status} />
+          <StatusBadge label="Embedding" status={article.embedding_status} />
         </div>
+        {article.matched_keywords.length > 0 && (
+          <p className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-ink-muted">
+            <span>Keywords:</span>
+            {article.matched_keywords.map((keyword) => (
+              <span key={keyword} className="rounded-full bg-surface-raised px-2 py-0.5 text-ink-secondary">
+                {keyword}
+              </span>
+            ))}
+          </p>
+        )}
       </div>
 
       <Card>
