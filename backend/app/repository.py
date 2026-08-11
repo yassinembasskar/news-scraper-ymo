@@ -70,22 +70,38 @@ def _serialize_article(doc: dict) -> dict:
 
 def upsert_article(article: ArticleCreate) -> bool:
     """Inserts a new article, or updates it in place if the url already
-    exists (this is the dedup mechanism for repeated/overlapping scrape
-    runs). Returns True if this was a new article, False if it updated
-    an existing one.
+    exists (this is the primary dedup mechanism for repeated/overlapping
+    scrape runs). Returns True if this was a new article, False if it
+    updated an existing one or was skipped as a cross-source duplicate.
+
+    A second, title-based dedup layer sits in front of that: an exact-title
+    match under a *different* url is treated as the same story republished/
+    syndicated by another outlet (verified live — one wire story appeared
+    under 16 distinct domains with an identical title), not a genuinely
+    different article. The earliest-published version wins:
+      - a candidate the same age or newer than the stored version is a
+        later syndicated copy — skipped, never written.
+      - a candidate that's genuinely earlier takes over the existing
+        document (same _id, so nothing downstream needs to change) only if
+        that document hasn't been extracted yet — safe, since there's no
+        extracted content/embeddings/score tied to a specific page yet.
+      - a candidate that's earlier but the existing document has already
+        been processed is still skipped, to avoid mismatching already-
+        extracted content/embeddings against a different URL.
 
     ingestion_status, content, the embedding fields (chunk_ids,
     number_of_chunks, embedding_status), the scoring fields
     (relativity_score, scored_status, score_explanation,
     relativity_score_adjustment), and the translation fields
     (translated_title, translated_content, translation_status) are
-    deliberately excluded from the overwrite: they belong to the
-    extraction/embedding/scoring/translation workflows, not to GNews data.
-    An article re-fetched by a later scrape (e.g. during a catch-up retry
-    that re-covers a date range) must never wipe out previously-extracted
-    content, previously-embedded chunks, previously-computed scores, a
-    cached translation, or reset their statuses back to their initial
-    values — $setOnInsert only applies these on a genuinely new document.
+    deliberately excluded from any overwrite in either path: they belong to
+    the extraction/embedding/scoring/translation workflows, not to scrape
+    data. An article re-fetched by a later scrape (e.g. during a catch-up
+    retry that re-covers a date range) must never wipe out previously-
+    extracted content, previously-embedded chunks, previously-computed
+    scores, a cached translation, or reset their statuses back to their
+    initial values — $setOnInsert only applies these on a genuinely new
+    document.
     """
     data = article.model_dump()
     data["url"] = str(data["url"])  # HttpUrl -> plain string for storage
@@ -98,6 +114,26 @@ def upsert_article(article: ArticleCreate) -> bool:
             "translated_title", "translated_content", "translation_status",
         )
     }
+
+    existing_by_title = articles.find_one(
+        {"title": data["title"], "url": {"$ne": data["url"]}},
+        {"published_at": 1, "ingestion_status": 1},
+    )
+    if existing_by_title:
+        existing_published_at = existing_by_title["published_at"]
+        if existing_published_at.tzinfo is None:
+            existing_published_at = existing_published_at.replace(tzinfo=timezone.utc)
+
+        if existing_published_at <= data["published_at"]:
+            return False  # same age or newer than the stored version — later syndicated copy, skip
+
+        if existing_by_title.get("ingestion_status") != "No Extraction":
+            return False  # earlier, but the stored one is already processed — leave it canonical
+
+        # Earlier, and the stored document is still untouched — take it
+        # over instead of inserting a second document for the same story.
+        articles.update_one({"_id": existing_by_title["_id"]}, {"$set": data})
+        return False
 
     result = articles.update_one(
         {"url": data["url"]},

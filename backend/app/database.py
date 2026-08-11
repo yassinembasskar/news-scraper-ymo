@@ -30,6 +30,15 @@ def init_indexes() -> None:
     # overlapping scrape runs (upsert on this field).
     articles.create_index([("url", ASCENDING)], unique=True)
 
+    # Not unique (deliberately) — this is a cross-source story-dedup
+    # accelerator, not a hard constraint. Same title, different URL happens
+    # legitimately (wire-service syndication across outlets — verified live:
+    # one story appeared under 16 distinct domains with an identical title),
+    # and repository.upsert_article() decides in application code whether a
+    # same-titled candidate should be skipped or take over the existing
+    # document, rather than the database rejecting the write outright.
+    articles.create_index([("title", ASCENDING)])
+
     # Supports date-range queries and the daily chart.
     articles.create_index([("published_at", ASCENDING)])
 
