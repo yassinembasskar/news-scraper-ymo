@@ -1,0 +1,101 @@
+i,j,cosine_similarity,title_i,title_j,label,label_meaning
+280,1412,0.297,"الـ""أوفر برايس"" يضرب أسعار نيسان صني موديل 2027 في مصر",HPQ Silicium et Novacium obtiennent leur première commande de packs batteries GEN3 pour équiper des drones FPV destinés un régiment de l’Armée de terre française,0,different_story
+92,1397,0.2136,2000 Mercedes-Benz SL500,"Des téraoctets de données d'identification d'organisations parmi les plus importantes et sensibles au monde sont exposés, lors d'une attaque de la chaîne d'approvisionnement visant LiteLLM",0,different_story
+45,1045,0.4344,Performance Brokerage Services Advises on the Sale of 3 Dick Smith Nissan dealerships and Dick Smith INFINITI in South Carolina from Dick Smith Automotive Group to Holler-Classic Automotive,Bugatti CEO Mate Rimac says the future of supercars is old-school combustion engines,0,different_story
+250,758,0.8977,Les nouveaux droits de douane américains menacent la reprise économique,"Les nouveaux droits de douane américains menacent la reprise, selon des économistes",1,same_story
+930,983,0.8561,One of world’s oldest orca whales found with possible shotgun wounds as officials launch investigation,"Oldest known Iberian orca found with potential shotgun wounds, sparking investigation from Spain officials",1,same_story
+539,580,0.3314,"Voici les nouvelles couleurs de la Renault 5 électrique, et ce n’est pas la seule bonne nouvelle",Le pari fou de Ford : ce nouveau SUV à prix cassé va-t-il sauver la marque ?,0,different_story
+214,936,0.5672,"China deploys naval fleet with 700 personnel near strategic Red Sea gateway, Suez Canal; amid Pakistan's push for Somalia defence pact",Chinese ship sets off for Europe through the arctic,0,different_story
+36,1154,0.2055,préavis de grève national et appel à la mobilisation ce mercredi 13 août,More than 830 homes facing water supply disruption in Kent villages,0,different_story
+1255,1289,0.3553,Finnair cancels Dubai flights for entire winter season,Putin decree lets Russia take control of infrastructure damaged in Ukrainian drone attacks,0,different_story
+542,972,0.2552,Une Toyota GR Prius dans les cartons ?,Egypt-Qatar trade rises 80% in 2025 as ties deepen - minister | Amwal Al Ghad,0,different_story
+327,1288,0.4123,لأول مرة.. ناقلة نفط كورية تتجه نحو قناة السويس بدلا من مضيق هرمز,Hormuz tanker hit as Pakistan pushes Iran-US talks in Tehran,0,different_story
+444,754,0.4604,Houthi Threat to Red Sea Shipping Rises,Les nouveaux droits de douane américains menacent la reprise économique,0,different_story
+48,122,0.5862,"Toyota recalls more than 508,000 vehicles. See affected models - USA Today",Toyota NZ recalls 176 Camry vehicles over display failure risk,0,different_story
+1139,1144,0.997,Japan's economy grows slower than expected in April-June,Japan’s economy grows slower than expected in April-June,1,same_story
+980,1331,0.3323,Distressing photos show critically endangered orca with gunshot wounds in fins,Sustainability leadership moves (2026),0,different_story
+1243,1250,0.8448,Ukraine aims a drone blitz at Moscow as Russian missiles kill 10 in a Ukrainian village,Moscow faces Ukraine drone blitz after its strike kills 10 in Kharkiv,1,same_story
+284,589,0.3371,أوبل فرونتيرا تنافس على لقب أرخص سيارة أوروبية 7 راكب في مصر,"PHOTOS - Alpine A110 électrique, Citroën 2CV, Dacia Spring, etc., les 10 nouveautés incontournables du Mondial de l'Auto 2026",0,different_story
+486,869,0.1969,"UK PM Burnham to visit Kyiv as Ukraine turns 35, Britain to boost long-range strike capability","At $6,500, Would You Let Nothing Stand In The Way Of Buying This 2003 Mercedes ML350 Overlander? - Jalopnik",0,different_story
+264,272,0.3211,Rhône. Grève chez easyJet : une semaine supplémentaire de « vacances imposées,"""Sauvegarder la compétitivité de l’entreprise"" : le caveau d’Héraclès envisage dix licenciements économiques",0,different_story
+684,1197,0.8963,"Trump vows to double Canadian auto tariffs, escalating fight",Trump threatens auto tariffs on Canada as fight threatens to drag on,1,same_story
+620,800,0.1588,La circulation des bus TEC perturbée dans la région Mons-Centre en raison d’une grève spontanée liée aux fortes chaleurs,M&S's new Studio perfumes rival Tom Ford and Jo Malone luxury fragrances,0,different_story
+931,982,0.7528,Why the Arctic sea route has become so important for China and Russia,"Strait of Hormuz chaos has incentivized China to use an alternative trade route: a 3,400 mile frozen Arctic channel dubbed the ‘Ice Silk Road’ | Fortune",0,different_story
+994,1048,0.4129,DHL Supply Chain expands operations across Asia and Europe - CEP Research,Western Caucus Congressional Delegation Visits the Estelle Gold and Critical Minerals Project,0,different_story
+931,984,0.8646,Why the Arctic sea route has become so important for China and Russia,China’s Arctic Ambitions: The Race for the Ice Silk Road,0,different_story
+131,1219,0.4334,"China Speeds Up Grip on Europe's EV Supply Chain, Targeting Germany",Namibia: Nigerian Fishing Community Being Eaten Up By the Atlantic,0,different_story
+463,1258,0.406,Loftware CPO Michelle Northey Wins 2026 Women in Supply Chain Forum™ Award,Canada Prepares to Retaliate on Trump's 50% Tariffs,0,different_story
+26,676,0.6151,"Three killed in attacks on ships in Red Sea, Gulf, sources say","Saudi vessel attacked in Red Sea, national shipping company confirms following Houthi claims",0,different_story
+44,458,0.3777,New Honda City Features Explained: What's New and What's Familiar?,TCR's Nadcap nod gives Indian MSMEs passport to aerospace supply chain,0,different_story
+390,536,0.5012,23k-Mile 2002 Ford Thunderbird,Stellantis : l’usine de Brampton menacée de vente,0,different_story
+786,962,0.4215,Jones says Japan 'watching videos of geese' for Australia clash,The Suez Crisis stopped the British Empire. Will Hormuz defeat the US?,0,different_story
+424,662,0.4345,"JD Technologies Global Selected by MoovinV to Market Julie, their AI Driven Platform for the Supply Chain",Analysis: China Leading High-Speed Spring Coiling Machine Manufacturer Impact On EV Seat Frames,0,different_story
+686,1178,0.9134,Trump threatens new Canada auto tariffs as trade dispute escalates,US-Canada trade war heats up as Trump threatens to hike auto tariffs,1,same_story
+1223,1231,0.8656,Russia issues warning as British-built drones used in strikes,Russia threatens UK over supplying Ukraine with drones,1,same_story
+53,396,0.693,Kinaxis-Sponsored Study Identifies Supply Chain AI Accountability Gap Amidst Rapid Adoption Expectations,DenimNotes Targets Supply Chain Inefficiencies With Shared Development Platform,0,different_story
+811,1319,0.4287,Breakenridge: Time to accommodate all modes of transportation on our roads,"Carlos Alcaraz, Jannik Sinner Lead US Open 2026 Injury Concerns",0,different_story
+764,765,0.2241,Contrôle aérien: Le personnel de Skyguide se rassemble contre les licenciements,"Bank of America Corp DE Sells 39,935 Shares of Lear Corporation $LEA",0,different_story
+11,1329,0.576,Toyota's wait time reduction plan exposed,Disney Offering Voluntary Early Retirement Packages To Execs (Exclu),0,different_story
+111,358,0.5947,The BMW Roundel Was Never Meant to Be a Propeller,BMW Brings New (And Old) Cars To Chengdu Auto Show: Video,0,different_story
+597,1456,0.7967,"Droits de douane: échec des négociations USA-Canada, Ottawa annonce à son tour imposer des surtaxes","Après l’échec des négociations de la dernière chance, les nouveaux droits de douane américains entrent en vigueur contre le Canada",1,same_story
+686,1179,0.8729,Trump threatens new Canada auto tariffs as trade dispute escalates,"Trump Vows to Double Canadian Auto Tariffs, Escalating Fight",1,same_story
+95,454,0.4091,To the Parents Driving Home with an Empty Seat,"LiteLLM Supply-Chain Attack – Technology, Banking and Healthcare the Most Affected",0,different_story
+749,1403,0.9704,Guerre au Moyen-Orient: les rebelles Houthis du Yémen revendiquent une frappe contre un pétrolier saoudien en mer Rouge,Guerre au Moyen-Orient - Les rebelles houthis du Yémen revendiquent l'attaque d'un pétrolier saoudien en mer Rouge,1,same_story
+324,331,0.9171,تداول 13 ألف طن و651 شاحنة بضائع عامة ومتنوعة بموانئ البحر الأحمر,تداول 10 آلاف طن و546 شاحنة بضائع عامة بموانئ البحر الأحمر,0,different_story
+616,627,0.2674,Grève d'hôtesses et stewards chez EasyJet en France: une centaine de vols annulés,Les États-Unis remboursent les droits de douane plus vite que prévu,0,different_story
+517,750,0.2196,A US envoy says Israel did not give a warning to the US ahead of a recent Syria air strike,Mer rouge : un projectile d’origine inconnue frappe un pétrolier et provoque un incendie à bord,0,different_story
+153,540,0.3268,Five cars that won’t be around after 2026 that could be worth buying now,"Tesla annonce son Semi en Europe, mais Mercedes, Volvo et Renault n’ont pas attendu Elon Musk",0,different_story
+378,461,0.5846,BMW i5 LWB: Key things to know about new electric sedan,"Buick just made a $25,000 all-electric vehicle. 430 mile range, FAST charging, cameras, bells and whistles. Sorry, you can't have one in the USA though [Sad]",0,different_story
+931,975,0.8885,Why the Arctic sea route has become so important for China and Russia,The promise and the pitfalls of China’s new Arctic shipping route,0,different_story
+46,1288,0.2881,"New Mercedes-Benz CLA teased – C174 EV with 792 km range, 320 kW charging launching soon in Malaysia",Hormuz tanker hit as Pakistan pushes Iran-US talks in Tehran,0,different_story
+199,200,0.7064,Donald Trump berates Premier Doug Ford as trade war reaches new low,'Kiss My A**': Doug Ford Doubles Down On Trump Attack Amid Canada-US Tariff War,1,same_story
+362,552,0.6214,2027 BMW i3 Touring Spied Near The Nürburgring: Video,Motard vs Conducteur BMW X4 #roadrage,0,different_story
+219,686,0.8604,Trump Offers to Cut Canada Auto Tariffs to 15% in Trade Deal,Trump threatens new Canada auto tariffs as trade dispute escalates,0,different_story
+757,760,0.8755,Droits de douane – Trump : les voitures produites au Canada seront taxées à 50% en 2027,Donald Trump annonce une hausse des droits de douane sur les voitures et camions canadiens à 50 % à partir de 2027,1,same_story
+229,955,0.4455,Water supply disruption on August 17,Container Shipping Companies Navigate Route Challenges,0,different_story
+1440,1441,0.9319,"Donald Trump menace le Canada, en affirmant que les voitures qui y sont produites seront taxées à 50 % dès le 1ᵉʳ janvier 2027",Droits de douane - Trump annonce que les voitures produites au Canada seront taxées à 50% au 1er janvier 2027,1,same_story
+616,1486,0.9181,Grève d'hôtesses et stewards chez EasyJet en France: une centaine de vols annulés,"France: grève d'hôtesses et stewards chez EasyJet, une centaine de vols annulés",1,same_story
+855,1288,0.288,Ayrton Senna's Legendary Honda NSX Could Fetch Over $1 Million,Hormuz tanker hit as Pakistan pushes Iran-US talks in Tehran,0,different_story
+1432,1434,0.9076,Donald Trump impose 100 % de droits de douane sur certains drones pour contrer les importations chinoises,Trump impose des droits de douane allant jusqu'à 100% sur les drones importés,1,same_story
+305,326,0.9643,تداول 14 ألف طن بضائع عامة في موانئ البحر الأحمر,تداول 16 ألف طن بضائع عامة في موانئ البحر الأحمر,0,different_story
+249,1462,0.7328,Droits de douane: le Canada répondra à Trump mardi,"Droits de douane - Un dirigeant provincial canadien qualifie Trump de ""peu fiable, irresponsable et mauvais""",0,different_story
+228,1229,0.5592,Oil Prices Set For 5% Weekly Gain As Fresh US Iran Measures Raise Supply Disruption Fears,"""Absolutely Unprecedented"": Diesel Crack Spread Hits Record As Refined-Products Crisis Arrives",0,different_story
+407,941,0.5948,UAE expands logistics network to boost supply chain resilience,Somali Piracy Surges Amid Hormuz Blockade,0,different_story
+282,408,0.4143,سعر ومواصفات أوبل فرونتيرا موديل 2027,Stock Still Looks Fully Priced After ERP Supply Chain News,0,different_story
+405,1079,0.5581,Supply Chain Issues Delaying US Grid Batteries' Installation,Nexperia China rebuilds 12-inch local supply chain after 330 days,0,different_story
+883,1318,0.6435,"SRCC, EY India launch free AI VIBE programme, applications open for 100 seats",This eBay Alum Built A One-Person Marketing Agency With 35 AI Agents,0,different_story
+223,533,0.4382,Rhenus Delivery Services expands electric vehicle fleet in Poland,"1 030 km en BMW iX3 sans charger : après l’Europe, le SUV électrique réitère l’exploit en Chine",0,different_story
+61,645,0.5543,General Motors Pulls the Plug on Chevrolet Retail Operations in China,1990 BMW K1 at No Reserve,0,different_story
+481,1237,0.8118,Hyundai union back in wage talks after rare day strike,Hyundai Motor Union Plans Full 8-Hour Strike and Rally on Sept. 21,0,different_story
+383,887,0.4459,BMW Industries Ltd (BOM:542669) (Q1 2027) Earnings Call Highlights: PAT Surges 25. ..,Perigon Wealth Management LLC Buys New Holdings in General Motors Company $GM,0,different_story
+696,993,0.5154,"FedEx Parcel Deliveries Face Disruption As Almost 4,000 Workers Strike",Why inflation could get worse,0,different_story
+1181,1197,0.8761,Trump is threatening new Canadian auto tariffs. That will hurt US automakers and workers | CNN Business,Trump threatens auto tariffs on Canada as fight threatens to drag on,1,same_story
+49,456,0.2957,Column: AI jailbreak incident highlights fresh demand for supply-chain resilience,"Houthis escalate Red Sea attacks: Ballistic missile strikes Saudi military ship, four escort boats",0,different_story
+1042,1119,0.7125,India to transfer state-developed missile technology to domestic defence companies,Why India needs to firewall its $9 billion German submarine deal,0,different_story
+221,684,0.5563,"Auto tariffs could push buyers out of new-car market, analyst warns","Trump vows to double Canadian auto tariffs, escalating fight",0,different_story
+10,393,0.4713,Matador Partners With Stellantis to Offer Dealers 100% Co-Op Eligibility for AI Sales and Service Automation,Mercedes drivers shrug off team orders decision during Dutch GP,0,different_story
+205,866,0.5518,"Chrysler, BMW, Toyota recall vehicles: NHTSA",Four youths arrested in stolen BMW due to appear in court,0,different_story
+127,669,0.7798,"World News | Houthis Announce Strikes on Saudi Ship, Military Sites in Red Sea",Yemen's Houthis claim attack on Saudi oil tanker in Red Sea,0,different_story
+478,481,0.4218,US military says strike on alleged drug-smuggling boat kills two,Hyundai union back in wage talks after rare day strike,0,different_story
+262,903,0.2643,Les salariés de l’automobile en grève contre les robots en Corée du Sud,"Florida, hard-hit by Obamacare drop-off, feels the squeeze of rising healthcare costs",0,different_story
+459,1403,0.6183,Houthis claim missile attack on Saudi military ship in Red Sea as naval blockade intensifies,Guerre au Moyen-Orient - Les rebelles houthis du Yémen revendiquent l'attaque d'un pétrolier saoudien en mer Rouge,1,same_story
+206,689,0.5657,Trump vs. Doug Ford Feud Timeline Amid US-Canada Trade Dispute,No U.S. cost estimate as Trump vows 50% Canada auto tariffs,0,different_story
+206,646,0.3704,Trump vs. Doug Ford Feud Timeline Amid US-Canada Trade Dispute,'We are taking the full thing'- Mercedes’ Toto Wolff shares an update on Kimi Antonelli’s current situation,0,different_story
+420,421,0.9958,Op-Ed: AI’s Last Mile and Why Your Supply Chain ‘Pilot’ Never Makes It into Production,Op-Ed: AI’s Last Mile and Why Your Supply Chain ‘Pilot’ Never Makes It into Production,1,same_story
+599,1454,0.7077,"Droits de douane de 50 %, riposte « au dollar près » : entre les Etats-Unis et le Canada, la guerre commerciale est relancée","Droits de douane - Échec des négociations USA-Canada, Ottawa annonce à son tour imposer des surtaxes",0,different_story
+62,1220,0.5707,Maersk CEO says conditions right to increase transit through Suez,Ship attacked during Strait of Hormuz transit and other news from the Middle East - AP News,0,different_story
+205,743,0.5541,"Chrysler, BMW, Toyota recall vehicles: NHTSA","Toyota Vitz climatisée, économique, disponible à louer",0,different_story
+766,770,0.7515,"Aptiv PLC (NYSE:APTV) Given Consensus Rating of ""Moderate Buy"" by Analysts",Aptiv (NYSE:APTV) Shares Acquired Sen. John Boozman,0,different_story
+579,1148,0.1815,"Pierre Dieudonné a retrouvé sa Mazda 787, 35 ans après l’épopée des 24 heures du Mans 1991",Blue Dart sets sights on bigger e-commerce slice with cross-border delivery push,0,different_story
+53,73,0.5526,Kinaxis-Sponsored Study Identifies Supply Chain AI Accountability Gap Amidst Rapid Adoption Expectations,US plans Panama pilot to speed AI chip shipments,0,different_story
+101,111,0.5888,1975 Honda CB550F Super Sport at No Reserve,The BMW Roundel Was Never Meant to Be a Propeller,0,different_story
+37,1221,0.239,Grève chez EasyJet : des perturbations pourraient toucher la Corse les 15 et 16 août,Iran fails to strike deal with US as deadline passes and Trump calls for ‘white flag of surrender',0,different_story
+760,1203,0.5612,Donald Trump annonce une hausse des droits de douane sur les voitures et camions canadiens à 50 % à partir de 2027,US–Canada Trade Deal Collapses As Trucks Trigger 50% Tariffs Shock,1,same_story
+305,331,0.8722,تداول 14 ألف طن بضائع عامة في موانئ البحر الأحمر,تداول 10 آلاف طن و546 شاحنة بضائع عامة بموانئ البحر الأحمر,0,different_story
+323,1122,0.1979,"رئيس قناة السويس يبحث مع ""CMA CGM"" تسريع عودة سفن المجموعة للعبور وتعزيز التعاون",US diesel crack surpasses US$100 a barrel for first time on supply disruptions,0,different_story
+789,1132,0.3568,"CNBC Daily Open: China in the crosshairs, Bitcoin is back and Dragon Ball Z diplomacy",Water supply disruption alert for Dublin residents as mains works take place,0,different_story
+219,1182,0.6309,Trump Offers to Cut Canada Auto Tariffs to 15% in Trade Deal,Automakers down on Trump threats: is there a TACO trade here? By Investing.com,0,different_story
+597,1455,0.9796,"Droits de douane: échec des négociations USA-Canada, Ottawa annonce à son tour imposer des surtaxes","Droits de douane - Echec des négociations USA-Canada, Ottawa annonce à son tour imposer des surtaxes",1,same_story
+936,963,0.8549,Chinese ship sets off for Europe through the arctic,South Korean Ship Sets Sail For Europe Via Arctic For First Time,0,different_story
+81,1161,0.241,"Ukrainian Navy command post, port infrastructure hit in new strikes by Russian Forces",Here Are 2 Dividend Stocks I’m Not Selling for 5 Years,0,different_story
+1227,1243,0.8772,Ukraine fires almost 800 drones at Moscow while Russian missiles kill 10 in Kharkiv,Ukraine aims a drone blitz at Moscow as Russian missiles kill 10 in a Ukrainian village,1,same_story
