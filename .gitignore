@@ -1,6 +1,7 @@
 # Environment variables (never commit real secrets/keys)
 .env
 backend/.env
+*.pem
 
 # Python
 __pycache__/

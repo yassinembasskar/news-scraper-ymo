@@ -51,10 +51,17 @@ class BucketSummaryResponse(BaseModel):
     language_counts: Dict[str, int]
 
 
+class TitleGateStageStats(BaseModel):
+    total: int  # every article — title gating's actual candidate pool
+    gated: int
+    not_gated: int
+
+
 class ExtractionStageStats(BaseModel):
     total: int
     successful: int
     failed: int
+    archived: int
     expired: int
     not_extracted: int
     pending: int
@@ -78,6 +85,7 @@ class ScoringStageStats(BaseModel):
 
 
 class PipelineStatsResponse(BaseModel):
+    title_gate: TitleGateStageStats
     extraction: ExtractionStageStats
     embedding: EmbeddingStageStats
     scoring: ScoringStageStats
@@ -92,8 +100,8 @@ def overview():
 
 @router.get("/pipeline", response_model=PipelineStatsResponse)
 def pipeline_stats():
-    """Per-stage status breakdowns (extraction/embedding/scoring) shown
-    under each pipeline button in the overview bar."""
+    """Per-stage status breakdowns (title gating/extraction/embedding/
+    scoring) shown under each pipeline button in the overview bar."""
     return stats.get_pipeline_stats()
 
 

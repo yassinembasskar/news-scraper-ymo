@@ -34,7 +34,6 @@ from app.services import (
     currents_client,
     gnews_client,
     keyword_matcher,
-    llm_insight,
     newsapi_org_client,
     newsdata_io_client,
     thenewsapi_com_client,
@@ -64,7 +63,6 @@ class ScrapeSummary:
     duplicate_articles: int = 0
     excluded_articles: int = 0
     malformed_articles: int = 0
-    archived_articles: int = 0
     errors: List[str] = field(default_factory=list)
 
 
@@ -113,22 +111,6 @@ def _process_article(raw: RawArticle) -> tuple:
     return "kept", article
 
 
-def _gate_new_article(article: ArticleCreate) -> None:
-    """Runs the title-only LLM pre-filter (services/llm_insight.gate_title)
-    on one genuinely new article and, if it's judged unable to affect the
-    tracked business, sets its ingestion_status to "Archived" in place —
-    before it's ever upserted, so this becomes the initial (and only ever
-    $setOnInsert'd) status. Fails open: if the LLM call errors (Ollama down,
-    timeout, bad response), the article is kept as "No Extraction" rather
-    than silently lost — a transient LLM hiccup should never be the reason
-    an article never gets a chance at extraction."""
-    try:
-        if not llm_insight.gate_title(article.title, article.language):
-            article.ingestion_status = "Archived"
-    except Exception:
-        pass
-
-
 def _build_message(summary: "ScrapeSummary") -> str:
     if summary.status == "skipped":
         return "Already scraped today — nothing to do."
@@ -138,8 +120,6 @@ def _build_message(summary: "ScrapeSummary") -> str:
         f"{summary.duplicate_articles} already seen",
         f"{summary.excluded_articles} excluded",
     ]
-    if summary.archived_articles:
-        parts.append(f"{summary.archived_articles} archived (title-filtered)")
     if summary.malformed_articles:
         parts.append(f"{summary.malformed_articles} malformed/skipped")
     base = f"Scrape {summary.status}: " + ", ".join(parts) + "."
@@ -178,7 +158,6 @@ def run_scrape() -> ScrapeSummary:
     new_count = 0
     duplicate_count = 0
     excluded_count = 0
-    archived_count = 0
 
     for raw in all_raw_articles:
         outcome, article = _process_article(raw)
@@ -190,18 +169,16 @@ def run_scrape() -> ScrapeSummary:
             malformed_count += 1
             continue
 
-        # Only genuinely new articles need the title gate: a duplicate's
-        # ingestion_status is protected from being overwritten by
-        # upsert_article() anyway, so gating it would just burn an LLM call
-        # for nothing.
-        if not repository.article_exists(str(article.url)):
-            _gate_new_article(article)
-
-        is_new = repository.upsert_article(article)
+        try:
+            is_new = repository.upsert_article(article)
+        except Exception as e:
+            # One article's write failing (e.g. an unexpected Mongo error)
+            # must not crash the whole multi-source run — same reasoning as
+            # one source's fetch_articles() failing not stopping the others.
+            all_errors.append(f"{article.title}: {e}")
+            continue
         if is_new:
             new_count += 1
-            if article.ingestion_status == "Archived":
-                archived_count += 1
         else:
             duplicate_count += 1
 
@@ -238,7 +215,6 @@ def run_scrape() -> ScrapeSummary:
         duplicate_articles=duplicate_count,
         excluded_articles=excluded_count,
         malformed_articles=malformed_count,
-        archived_articles=archived_count,
         errors=all_errors,
     )
     summary.message = _build_message(summary)
@@ -252,7 +228,6 @@ def run_scrape() -> ScrapeSummary:
         duplicate_articles=summary.duplicate_articles,
         excluded_articles=summary.excluded_articles,
         malformed_articles=summary.malformed_articles,
-        archived_articles=summary.archived_articles,
         errors=summary.errors,
     )
 

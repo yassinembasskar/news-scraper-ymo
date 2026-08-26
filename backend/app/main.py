@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import database, repository
-from app.routers import articles, embedding, extraction, reports, scoring, stats, update
+from app.routers import articles, embedding, extraction, reports, scoring, stats, title_gate, update
 
 
 @asynccontextmanager
@@ -36,6 +36,11 @@ async def lifespan(app: FastAPI):
     # unrunnable — and, for extraction/embedding/scoring alike, an article
     # a run never reached or didn't finish falls back to its pre-run
     # status rather than ending up mislabeled "Failed".
+    # Title gating has no per-article "Pending" state to reset (a gate call
+    # is a single synchronous request, not a multi-step process, same as
+    # report generation) — only the Mongo-backed job guard needs clearing.
+    repository.set_title_gate_in_progress(False)
+    repository.set_title_gate_stop_requested(False)
     repository.reset_pending_extraction_articles()
     repository.set_extraction_in_progress(False)
     repository.set_extraction_stop_requested(False)
@@ -81,6 +86,7 @@ app.add_middleware(
 app.include_router(update.router)
 app.include_router(articles.router)
 app.include_router(stats.router)
+app.include_router(title_gate.router)
 app.include_router(extraction.router)
 app.include_router(embedding.router)
 app.include_router(scoring.router)

@@ -2,9 +2,10 @@
 // one type per shape the backend actually returns. Kept intentionally
 // close to the Pydantic source so a backend field rename is easy to spot.
 
-export type IngestionStatus = "No Extraction" | "Pending" | "Successful" | "Failed" | "Expired";
+export type IngestionStatus = "No Extraction" | "Pending" | "Successful" | "Failed" | "Expired" | "Archived";
 export type EmbeddingStatus = "Not Embedded" | "Pending" | "Embedded" | "Failed" | "Expired";
 export type ScoredStatus = "Not Scored" | "Pending" | "Scored" | "Failed";
+export type TitleGateStatus = "Not Gated" | "Gated";
 
 export interface ScoreExplanationNode {
   node_id: string;
@@ -27,6 +28,7 @@ export interface Article {
   published_at: string;
   language: string;
   matched_keywords: string[];
+  title_gate_status: TitleGateStatus;
   ingestion_status: IngestionStatus;
   content: string | null;
   chunk_ids: string[];
@@ -84,10 +86,17 @@ export interface OverviewResponse {
   last_scraped: string | null;
 }
 
+export interface TitleGateStageStats {
+  total: number;
+  gated: number;
+  not_gated: number;
+}
+
 export interface ExtractionStageStats {
   total: number;
   successful: number;
   failed: number;
+  archived: number;
   expired: number;
   not_extracted: number;
   pending: number;
@@ -111,6 +120,7 @@ export interface ScoringStageStats {
 }
 
 export interface PipelineStatsResponse {
+  title_gate: TitleGateStageStats;
   extraction: ExtractionStageStats;
   embedding: EmbeddingStageStats;
   scoring: ScoringStageStats;
@@ -205,4 +215,14 @@ export interface GenerateStatusResponse {
   total: number;
   processed: number;
   estimated_minutes_remaining: number | null;
+}
+
+// ── Archived articles (title-gate LLM rejects) ──────────────────────────
+
+export interface FlushArchivedResponse {
+  deleted_count: number;
+}
+
+export interface DisarchiveResponse {
+  status: string; // "ok" | "not_found"
 }
