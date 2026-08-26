@@ -10,6 +10,8 @@ import type {
   CalendarResponse,
   ChartResponse,
   DailyReportResponse,
+  DisarchiveResponse,
+  FlushArchivedResponse,
   GenerateStatusResponse,
   OverviewResponse,
   PipelineStatsResponse,
@@ -58,6 +60,19 @@ export const getExtractionStatus = () => get<StageStatusResponse>("/articles/ext
 export const stopExtraction = () => post<StageTriggerResponse>("/articles/extract/stop");
 export const retryArticleExtraction = (articleId: string) =>
   post<SingleExtractionResponse>(`/articles/${articleId}/extract`);
+
+// ── Title gate ────────────────────────────────────────────────────────
+
+export const triggerTitleGate = () => post<StageTriggerResponse>("/articles/title-gate");
+export const getTitleGateStatus = () => get<StageStatusResponse>("/articles/title-gate/status");
+export const stopTitleGate = () => post<StageTriggerResponse>("/articles/title-gate/stop");
+
+// ── Archived articles (title-gate rejects) ───────────────────────────
+
+export const getArchivedArticles = () => get<Article[]>("/archived");
+export const disarchiveArticle = (articleId: string) =>
+  post<DisarchiveResponse>(`/archived/${articleId}/disarchive`);
+export const flushArchivedArticles = () => post<FlushArchivedResponse>("/archived/flush");
 
 // ── Embedding ─────────────────────────────────────────────────────────
 

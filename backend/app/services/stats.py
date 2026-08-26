@@ -95,15 +95,24 @@ def get_bucket_summary(date_from: datetime, date_to: datetime) -> dict:
 # ── Pipeline stage stats (overview bar, under each button) ─────────────
 
 def get_pipeline_stats() -> dict:
-    """Per-stage status breakdowns shown under the "Extract articles",
-    "Embed articles", and "Relativity scoring" buttons. Each stage's
-    denominator is its own actual candidate pool, not the whole
-    collection — extraction is counted over every article, embedding over
-    articles that were actually successfully extracted (the only ones
-    ever eligible, per get_articles_pending_embedding()'s
-    ingestion_status == "Successful" filter), and scoring over articles
-    that were actually embedded (same reasoning, embedding_status ==
-    "Embedded")."""
+    """Per-stage status breakdowns shown under the "Gate titles", "Extract
+    articles", "Embed articles", and "Relativity scoring" buttons. Each
+    stage's denominator is its own actual candidate pool, not the whole
+    collection — extraction is counted over every article, title gating
+    over articles still in "No Extraction" (same pool
+    get_articles_pending_title_gate() draws from — anything
+    Successful/Failed/Expired/Archived is already resolved one way or
+    another and will never be touched by this stage again, regardless of
+    whether it was ever literally run through the LLM check, so counting
+    it here would just be noise), embedding over articles that were
+    actually successfully extracted (the only ones ever eligible, per
+    get_articles_pending_embedding()'s ingestion_status == "Successful"
+    filter), and scoring over articles that were actually embedded (same
+    reasoning, embedding_status == "Embedded")."""
+    title_gate_counts = repository.get_status_field_counts(
+        "title_gate_status", {"ingestion_status": "No Extraction"}
+    )
+    title_gate_total = sum(title_gate_counts.values())
     extraction_counts = repository.get_status_field_counts("ingestion_status")
     total_articles = sum(extraction_counts.values())
 
@@ -118,16 +127,21 @@ def get_pipeline_stats() -> dict:
     embedded_total = embedding_counts.get("Embedded", 0)
 
     return {
+        "title_gate": {
+            "total": title_gate_total,
+            "gated": title_gate_counts.get("Gated", 0),
+            "not_gated": title_gate_counts.get("Not Gated", 0),
+        },
         "extraction": {
             "total": total_articles,
             "successful": extraction_counts.get("Successful", 0),
-            # Archived articles (the title gate decided they can't affect the
-            # tracked business) are folded in here rather than shown as their
-            # own bucket: from extraction's point of view, an archived
-            # article will never be extracted — the same practical outcome
-            # as a failed one, just decided earlier and for a different
-            # reason (relevance, not a paywall/timeout/layout failure).
-            "failed": extraction_counts.get("Failed", 0) + extraction_counts.get("Archived", 0),
+            "failed": extraction_counts.get("Failed", 0),
+            # Its own bucket, not folded into "failed" — an archived article
+            # was never even attempted; it was deliberately never sent to
+            # extraction at all, a different outcome from a real extraction
+            # failure (paywall, timeout, layout). See routers/articles.py's
+            # Archived-review endpoints.
+            "archived": extraction_counts.get("Archived", 0),
             "expired": extraction_counts.get("Expired", 0),
             "not_extracted": extraction_counts.get("No Extraction", 0),
             "pending": extraction_counts.get("Pending", 0),

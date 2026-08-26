@@ -37,12 +37,13 @@ export function usePipelineStats(fast = false) {
 
 // ── Generic stage (extraction / embedding / scoring) ────────────────────
 
-export type StageName = "extraction" | "embedding" | "scoring";
+export type StageName = "titleGate" | "extraction" | "embedding" | "scoring";
 
 const STAGE_API: Record<
   StageName,
   { status: () => Promise<StageStatusResponse>; trigger: () => Promise<unknown>; stop: () => Promise<unknown> }
 > = {
+  titleGate: { status: api.getTitleGateStatus, trigger: api.triggerTitleGate, stop: api.stopTitleGate },
   extraction: { status: api.getExtractionStatus, trigger: api.triggerExtraction, stop: api.stopExtraction },
   embedding: { status: api.getEmbeddingStatus, trigger: api.triggerEmbedding, stop: api.stopEmbedding },
   scoring: { status: api.getScoringStatus, trigger: api.triggerScoring, stop: api.stopScoring },
@@ -56,15 +57,21 @@ export function useStageStatus(stage: StageName) {
   });
 }
 
-// The three per-stage cards each already poll their own stage-status query;
+// The four per-stage cards each already poll their own stage-status query;
 // this just reads those same cached results (no extra request) to answer
 // "is anything running right now", so the dashboard can speed up the
 // pipeline-stats poll to match while a run is active.
 export function useAnyStageRunning() {
+  const titleGate = useStageStatus("titleGate");
   const extraction = useStageStatus("extraction");
   const embedding = useStageStatus("embedding");
   const scoring = useStageStatus("scoring");
-  return Boolean(extraction.data?.in_progress || embedding.data?.in_progress || scoring.data?.in_progress);
+  return Boolean(
+    titleGate.data?.in_progress ||
+      extraction.data?.in_progress ||
+      embedding.data?.in_progress ||
+      scoring.data?.in_progress,
+  );
 }
 
 export function useStageActions(stage: StageName) {

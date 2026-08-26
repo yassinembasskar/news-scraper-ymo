@@ -79,3 +79,41 @@ def submit_manual_content(article_id: str, payload: ManualContentRequest):
 
     repository.set_article_content(article_id, payload.content, "Successful")
     return {"status": "ok"}
+
+
+class FlushArchivedResponse(BaseModel):
+    deleted_count: int
+
+
+class DisarchiveResponse(BaseModel):
+    status: str  # "ok" | "not_found"
+
+
+@router.get("/archived", response_model=List[ArticleOut])
+def list_archived_articles():
+    """Every article the title-gate LLM archived — the Archived review
+    page's data source. Unlike GET /articles?include_archived=true, this
+    returns *only* archived articles (no other filters), since the review
+    page's whole purpose is auditing that one bucket."""
+    return repository.get_archived_articles()
+
+
+@router.post("/archived/{article_id}/disarchive", response_model=DisarchiveResponse)
+def disarchive_article(article_id: str):
+    """Reverses one title-gate decision a human judged wrong — the article
+    goes back to "No Extraction" and re-enters the normal pipeline on the
+    next extraction run."""
+    try:
+        changed = repository.disarchive_article(article_id)
+    except InvalidId:
+        return DisarchiveResponse(status="not_found")
+    return DisarchiveResponse(status="ok" if changed else "not_found")
+
+
+@router.post("/archived/flush", response_model=FlushArchivedResponse)
+def flush_archived_articles():
+    """Permanently deletes every currently-Archived article — the "Flush
+    archived" button's destructive action. Irreversible: unlike
+    disarchiving, there's no undo once this runs."""
+    deleted = repository.flush_archived_articles()
+    return FlushArchivedResponse(deleted_count=deleted)

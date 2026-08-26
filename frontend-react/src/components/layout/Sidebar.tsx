@@ -1,11 +1,12 @@
 import { NavLink } from "react-router-dom";
-import { FileText, LayoutDashboard, Moon, Newspaper, Sun } from "lucide-react";
+import { Archive, FileText, LayoutDashboard, Moon, Newspaper, Sun } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/lib/theme";
 
 const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, end: true },
   { to: "/reports", label: "Reports", icon: FileText, end: false },
+  { to: "/archived", label: "Archived", icon: Archive, end: false },
 ];
 
 export function Sidebar() {

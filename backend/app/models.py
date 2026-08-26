@@ -17,6 +17,7 @@ IngestionStatus = Literal["No Extraction", "Pending", "Successful", "Failed", "E
 EmbeddingStatus = Literal["Not Embedded", "Pending", "Embedded", "Failed", "Expired"]
 ScoredStatus = Literal["Not Scored", "Pending", "Scored", "Failed"]
 TranslationStatus = Literal["Not Translated", "Translated", "Failed"]
+TitleGateStatus = Literal["Not Gated", "Gated"]
 class ArticleBase(BaseModel):
     """Fields common to every article, before it has a database id."""
     url: HttpUrl
@@ -26,6 +27,32 @@ class ArticleBase(BaseModel):
     published_at: datetime
     language: str
     matched_keywords: List[str] = Field(default_factory=list)
+    # Whether this article's title has been through the LLM title-gate
+    # pre-filter yet (services/title_gate.py) — separate from
+    # ingestion_status because passing the gate doesn't change
+    # ingestion_status at all (it just clears the article to proceed to
+    # extraction as normal); only failing it does, by setting
+    # ingestion_status to "Archived". Protected by upsert_article()'s
+    # $setOnInsert like the other pipeline-stage fields, so a re-scrape of
+    # an already-gated article never resets it back to "Not Gated".
+    title_gate_status: TitleGateStatus = "Not Gated"
+    # The two independent title-gate decisions this article actually got,
+    # recorded separately from the combined outcome above (see
+    # services/title_gate.py's OR-ensemble, added 2026-08-26: an article is
+    # archived only if BOTH the LLM gate and the embedding classifier say
+    # not-relevant; if either says relevant, it's kept). Kept side by side
+    # so the two mechanisms can be compared after the fact (see
+    # export_title_gate_tracking.py) — None until the article has actually
+    # been gated.
+    title_gate_llm_decision: Optional[bool] = None
+    title_gate_model_decision: Optional[bool] = None
+    # The title's own embedding (Qwen3-Embedding-0.6B, same model as the
+    # content-chunk embeddings, 1024-dim), computed once by the title-gate
+    # classifier and stored here so it never needs recomputing later — for
+    # re-evaluating/retraining the classifier, or for the entity/clustering
+    # work in the next pipeline stage (docs/brainstorm-general-architecture.md),
+    # which needs title embeddings anyway.
+    title_embedding: Optional[List[float]] = None
     ingestion_status: IngestionStatus = "No Extraction"
     content: Optional[str] = None
     # Populated by the embedding job (services/embedder.py), not by the
@@ -128,6 +155,23 @@ class ExtractionRunStatus(BaseModel):
     Playwright/Chromium instances running in the same process — this
     document exists so progress/ETA can be polled and a run can be stopped
     cooperatively, the same way embedding/scoring already work."""
+    last_run_at: Optional[datetime] = None
+    last_run_status: Optional[Literal["success", "partial", "failed", "stopped", "skipped"]] = None
+    in_progress: bool = False
+    total: int = 0
+    processed: int = 0
+    started_at: Optional[datetime] = None
+    stop_requested: bool = False
+    avg_seconds_per_article: Optional[float] = None
+
+
+class TitleGateRunStatus(BaseModel):
+    """The single `meta` document (_id: "title_gate_status") tracking the
+    title-gate job's state — identical shape to ExtractionRunStatus, same
+    reasoning throughout (see that model's docstring/comments). No
+    per-article "Pending" state to reset on a crash (a title-gate call is a
+    single synchronous request, not a multi-step process), same as
+    ReportRunStatus."""
     last_run_at: Optional[datetime] = None
     last_run_status: Optional[Literal["success", "partial", "failed", "stopped", "skipped"]] = None
     in_progress: bool = False

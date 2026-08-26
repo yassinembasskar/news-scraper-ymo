@@ -22,7 +22,10 @@ function tierFor(status: string): Tier {
   if (DONE_VALUES.has(status)) return "done";
   if (status === "Failed") return "failed";
   if (status === "Pending") return "pending";
-  if (status === "Expired") return "expired";
+  // Both are terminal, non-actionable states — an archived article was
+  // deliberately never sent to extraction, same practical "done, nothing
+  // more happens here" shape as an expired one, just for a different reason.
+  if (status === "Expired" || status === "Archived") return "expired";
   return "notStarted"; // "No Extraction" | "Not Embedded" | "Not Scored"
 }
 

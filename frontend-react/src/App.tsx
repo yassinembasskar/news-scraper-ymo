@@ -5,6 +5,7 @@ import { AppShell } from "@/components/layout/AppShell";
 import Dashboard from "@/pages/Dashboard";
 import ArticleDetail from "@/pages/ArticleDetail";
 import Reports from "@/pages/Reports";
+import Archived from "@/pages/Archived";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,6 +26,7 @@ export default function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/articles/:id" element={<ArticleDetail />} />
               <Route path="/reports" element={<Reports />} />
+              <Route path="/archived" element={<Archived />} />
             </Routes>
           </AppShell>
         </BrowserRouter>

@@ -36,6 +36,7 @@ from app.models import (
     ReportRunStatus,
     ScoringRunStatus,
     ScrapeStatus,
+    TitleGateRunStatus,
 )
 from app.database import articles, meta, db
 
@@ -44,6 +45,7 @@ META_EMBEDDING_DOC_ID = "embedding_status"
 META_SCORING_DOC_ID = "scoring_status"
 META_EXTRACTION_DOC_ID = "extraction_status"
 META_REPORT_DOC_ID = "report_status"
+META_TITLE_GATE_DOC_ID = "title_gate_status"
 # One document per generated day, _id == report_date ("YYYY-MM-DD", UTC).
 # Presence of a document is the "this day was processed" signal the calendar
 # reads; see models.DailyReport.
@@ -109,9 +111,9 @@ def upsert_article(article: ArticleCreate) -> bool:
     set_on_insert = {
         key: data.pop(key)
         for key in (
-            "ingestion_status", "content", "chunk_ids", "number_of_chunks", "embedding_status",
-            "relativity_score", "scored_status", "score_explanation", "relativity_score_adjustment",
-            "translated_title", "translated_content", "translation_status",
+            "title_gate_status", "ingestion_status", "content", "chunk_ids", "number_of_chunks",
+            "embedding_status", "relativity_score", "scored_status", "score_explanation",
+            "relativity_score_adjustment", "translated_title", "translated_content", "translation_status",
         )
     }
 
@@ -132,6 +134,15 @@ def upsert_article(article: ArticleCreate) -> bool:
 
         # Earlier, and the stored document is still untouched — take it
         # over instead of inserting a second document for the same story.
+        # But the new url might already belong to some OTHER document (e.g.
+        # this exact story already reached the collection under this url,
+        # via a different title variant, on an earlier run) — blindly
+        # reassigning url here would collide with that document's unique
+        # url and crash the whole scrape (confirmed live: a real
+        # DuplicateKeyError on the url index). Skip the takeover instead if
+        # that's the case, same as any other duplicate.
+        if articles.find_one({"url": data["url"], "_id": {"$ne": existing_by_title["_id"]}}, {"_id": 1}):
+            return False
         articles.update_one({"_id": existing_by_title["_id"]}, {"$set": data})
         return False
 
@@ -147,12 +158,22 @@ def upsert_article(article: ArticleCreate) -> bool:
 
 
 def article_exists(url: str) -> bool:
-    """Cheap existence check by URL — lets the scraper skip the title-gate
-    LLM call for a URL it's already seen (only genuinely new articles need
-    gating; re-running it on a duplicate would be wasted CPU/time and
-    couldn't change the stored article's status anyway, since
-    ingestion_status is only ever set on insert)."""
+    """Cheap existence check by URL."""
     return articles.find_one({"url": url}, {"_id": 1}) is not None
+
+
+def get_articles_pending_title_gate() -> List[ArticleOut]:
+    """Returns every article still in "No Extraction" that hasn't been
+    through the title gate yet — the candidate pool for the title-gate job
+    (services/title_gate.py). Scoped to ingestion_status == "No Extraction"
+    so this only ever touches the live, ongoing scrape backlog — anything
+    already Successful/Failed/Expired/Archived was either already gated, or
+    predates this stage entirely and is out of scope for the routine job."""
+    cursor = articles.find({
+        "ingestion_status": "No Extraction",
+        "title_gate_status": {"$ne": "Gated"},
+    })
+    return [ArticleOut(**_serialize_article(doc)) for doc in cursor]
 
 
 def get_articles(
@@ -807,16 +828,18 @@ def get_status_field_counts(field: str, query: Optional[dict] = None) -> dict:
 
 
 def get_running_pipeline_stage() -> Optional[str]:
-    """Returns which pipeline stage — 'extraction', 'embedding', 'scoring',
-    or 'report generation' — currently has its in_progress flag set, or None
-    if none do. Used to enforce that only one stage runs at a time:
-    extraction (Playwright/Chromium), embedding (the sentence-transformer
-    model), scoring (the tree-walk CPU work), and report generation (the
-    Ollama LLM) are all heavy and each already guards against overlapping
-    with itself — this is the same guard extended across stages, so a click
-    on "Embed articles" while extraction is still running waits instead of
-    fighting it for CPU."""
+    """Returns which pipeline stage — 'title gating', 'extraction',
+    'embedding', 'scoring', or 'report generation' — currently has its
+    in_progress flag set, or None if none do. Used to enforce that only one
+    stage runs at a time: title gating and report generation both hit the
+    same single Ollama instance, extraction drives Playwright/Chromium,
+    embedding runs the sentence-transformer model, and scoring is
+    tree-walk CPU work — all heavy, and each already guards against
+    overlapping with itself; this is the same guard extended across
+    stages, so a click on "Embed articles" while extraction is still
+    running waits instead of fighting it for CPU."""
     for stage, doc_id in (
+        ("title gating", META_TITLE_GATE_DOC_ID),
         ("extraction", META_EXTRACTION_DOC_ID),
         ("embedding", META_EMBEDDING_DOC_ID),
         ("scoring", META_SCORING_DOC_ID),
@@ -910,6 +933,181 @@ def set_extraction_run_outcome(last_run_at: datetime, last_run_status: str) -> N
         {"$set": {"last_run_at": last_run_at, "last_run_status": last_run_status}},
         upsert=True,
     )
+
+
+# ── Title-gate job status ────────────────────────────────────────────────
+# Mirrors the extraction-status helpers above one-for-one, on the
+# title_gate_status meta document.
+
+def get_title_gate_status() -> Optional[TitleGateRunStatus]:
+    """Returns the current title-gate-job status, or None if it has never
+    run yet."""
+    doc = meta.find_one({"_id": META_TITLE_GATE_DOC_ID})
+    if doc is None:
+        return None
+    doc = dict(doc)
+    doc.pop("_id")
+    return TitleGateRunStatus(**doc)
+
+
+def set_title_gate_in_progress(value: bool) -> None:
+    """Flips just the in_progress flag on the title-gate-status document —
+    Mongo-backed overlap guard, same as set_extraction_in_progress()."""
+    meta.update_one(
+        {"_id": META_TITLE_GATE_DOC_ID},
+        {"$set": {"in_progress": value}},
+        upsert=True,
+    )
+
+
+def set_title_gate_progress(total: int, processed: int) -> None:
+    """Updates the live progress counters on the title-gate-status document."""
+    meta.update_one(
+        {"_id": META_TITLE_GATE_DOC_ID},
+        {"$set": {"total": total, "processed": processed}},
+        upsert=True,
+    )
+
+
+def set_title_gate_stop_requested(value: bool) -> None:
+    """Flips the stop_requested flag — same cooperative-stop pattern as the
+    other stages."""
+    meta.update_one(
+        {"_id": META_TITLE_GATE_DOC_ID},
+        {"$set": {"stop_requested": value}},
+        upsert=True,
+    )
+
+
+def set_title_gate_rate(avg_seconds_per_article: float) -> None:
+    """Updates the exponential moving average of seconds-per-article on the
+    title-gate-status document."""
+    meta.update_one(
+        {"_id": META_TITLE_GATE_DOC_ID},
+        {"$set": {"avg_seconds_per_article": avg_seconds_per_article}},
+        upsert=True,
+    )
+
+
+def set_title_gate_started(started_at: datetime) -> None:
+    """Records when the current title-gate run began."""
+    meta.update_one(
+        {"_id": META_TITLE_GATE_DOC_ID},
+        {"$set": {"started_at": started_at}},
+        upsert=True,
+    )
+
+
+def set_title_gate_run_outcome(last_run_at: datetime, last_run_status: str) -> None:
+    """Records the outcome of the most recent title-gate run without
+    touching in_progress — see set_extraction_run_outcome()."""
+    meta.update_one(
+        {"_id": META_TITLE_GATE_DOC_ID},
+        {"$set": {"last_run_at": last_run_at, "last_run_status": last_run_status}},
+        upsert=True,
+    )
+
+
+def set_title_gate_result(
+    article_id: str,
+    archived: bool,
+    llm_relevant: Optional[bool],
+    model_relevant: bool,
+    title_embedding: Optional[List[float]],
+) -> None:
+    """Records one article's title-gate outcome: title_gate_status always
+    flips to "Gated" (so it's never re-picked-up by the job), and if the
+    decision (see services/title_gate.py — the model alone as of
+    2026-08-26) judged it irrelevant, ingestion_status also flips to
+    "Archived" in the same update — the two must always change together,
+    since an archived article's story is entirely "this was gated and
+    rejected".
+
+    Also persists whichever decisions were actually made and the title's
+    own embedding, so the LLM gate and the embedding classifier can still
+    be compared after the fact (see export_title_gate_tracking.py /
+    compare_model_vs_llm_gate.py) and the embedding never needs
+    recomputing later. llm_relevant is None when the LLM wasn't run for
+    this article (the current live default)."""
+    update = {
+        "title_gate_status": "Gated",
+        "title_gate_llm_decision": llm_relevant,
+        "title_gate_model_decision": model_relevant,
+        "title_embedding": title_embedding,
+    }
+    if archived:
+        update["ingestion_status"] = "Archived"
+    articles.update_one({"_id": ObjectId(article_id)}, {"$set": update})
+
+
+def log_title_gate_run(
+    status: str,
+    message: str,
+    gated_articles: int,
+    archived_articles: int,
+    errors: List[str],
+) -> None:
+    """Appends a permanent record of one title-gate run to the
+    title_gate_runs collection — the title-gate job's counterpart to
+    log_extraction_run()/log_embedding_run()/log_scoring_run()."""
+    db["title_gate_runs"].insert_one({
+        "status": status,
+        "message": message,
+        "gated_articles": gated_articles,
+        "archived_articles": archived_articles,
+        "errors": errors,
+        "logged_at": datetime.now(timezone.utc),
+    })
+
+
+# ── Archived-articles management (the title-gate LLM's rejects) ─────────
+
+def get_archived_articles() -> List[ArticleOut]:
+    """Returns every article the title gate archived, newest-published
+    first — the candidate pool for the Archived review page."""
+    cursor = articles.find({"ingestion_status": "Archived"}).sort("published_at", -1)
+    return [ArticleOut(**_serialize_article(doc)) for doc in cursor]
+
+
+def disarchive_article(article_id: str) -> bool:
+    """Reverses one title-gate decision a human judged wrong: flips
+    ingestion_status back to "No Extraction" so it re-enters the normal
+    pipeline. title_gate_status is left at "Gated" (it already is, from
+    having been archived) rather than reset to "Not Gated" — otherwise the
+    next title-gate run would just re-check and potentially re-archive it,
+    silently undoing the human's override. Only takes effect on an
+    article that's actually currently Archived. Returns True if a document
+    was changed."""
+    result = articles.update_one(
+        {"_id": ObjectId(article_id), "ingestion_status": "Archived"},
+        {"$set": {"ingestion_status": "No Extraction", "title_gate_status": "Gated"}},
+    )
+    return result.modified_count > 0
+
+
+def flush_archived_articles() -> int:
+    """Permanently deletes every Archived article from Mongo — the
+    "flush" button on the Archived review page. Archived articles are
+    never extracted/embedded, so they should never hold Pinecone vectors,
+    but chunk_ids is still checked and cleaned up defensively (same
+    belt-and-suspenders pattern as expire_old_content()) in case one was
+    ever archived after already being embedded by some other path. Returns
+    how many articles were deleted."""
+    candidates = list(articles.find({"ingestion_status": "Archived"}, {"chunk_ids": 1}))
+    if not candidates:
+        return 0
+
+    chunk_ids_to_delete = [
+        chunk_id for doc in candidates for chunk_id in doc.get("chunk_ids", [])
+    ]
+    if chunk_ids_to_delete:
+        pc = Pinecone(api_key=settings.pinecone_api_key)
+        index = pc.Index(PINECONE_INDEX_NAME)
+        for i in range(0, len(chunk_ids_to_delete), PINECONE_DELETE_BATCH_SIZE):
+            index.delete(ids=chunk_ids_to_delete[i : i + PINECONE_DELETE_BATCH_SIZE])
+
+    result = articles.delete_many({"_id": {"$in": [doc["_id"] for doc in candidates]}})
+    return result.deleted_count
 
 
 def set_ingestion_status_bulk(article_ids: List[str], status: str) -> None:
