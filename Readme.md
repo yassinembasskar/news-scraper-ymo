@@ -30,9 +30,11 @@ Relevant news about all of the above is published continuously, often in multipl
 5. **Clusters each day's gated articles into stories**, extracts the full text of every clustered article, condenses each cluster down to its deduplicated, non-redundant content, extracts and canonicalizes the real-world entities it mentions, links it to earlier clusters covering a related past event, and generates structured LLM insights straight from that cluster — six automated phases described in [Preprocessing pipeline](#preprocessing-pipeline).
 6. **Presents an interactive dashboard** where you can:
    - See today's and this month's totals and most-mentioned keyword at a glance
+   - Watch the title-gate and six preprocessing phases as one continuous **signal path** — a wiring-harness-inspired trace where each stage lights up as it's reached, so pipeline health reads at a glance without needing to understand the underlying architecture
+   - Watch **live quality dials** for the four LLM/embedding-driven phases (condensing, entities, contextualization, insights) *while a backlog run is in progress* — average chunks/entities per cluster, contextualization hit rate, insight yield rate — so a mistuned threshold or a broken phase surfaces early, not only once the whole run finishes
    - Browse a day-by-day grid of every day scraped so far, color-coded by title-gate/clustering status
    - Click any day to see its clusters, and any cluster to see its condensed content, entities, similar past clusters, generated insights, and full member articles
-   - Trigger and monitor the title-gate and preprocessing stages, each with a live progress bar, ETA, and stop button
+   - Trigger and monitor the title-gate and preprocessing stages independently, each with a live progress bar, ETA, and stop button
    - Review daily LLM insight reports right below the cluster browser
 7. **Updates incrementally** — click "Update now" and it only fetches what's changed since the last successful run, rather than re-fetching everything every time.
 8. **Generates LLM insights automatically, per cluster** — the last preprocessing phase feeds each contextualized cluster's condensed content (plus its similar-past-clusters context) to a local LLM: each genuinely operational event becomes a structured card (the affected **operational parameter**, whether the effect is positive/negative/neutral, a confidence %, and a concrete recommended action, citing exactly which content chunks support it), while stories with nothing operationally relevant produce none. There's no "Generate" button to click — it runs as part of the normal preprocessing backlog, same as clustering or entity extraction.
@@ -51,9 +53,11 @@ The point of the pipeline isn't just "more articles" — it's a small number of 
 | **Title-gate funnel** (gated / archived / passed, day-level completeness) | How much of what's found is judged irrelevant before any expensive work happens, and whether gating has caught up with the scrape backlog | ✅ Live — `/stats/pipeline`'s `title_gate` block, plus per-day markers on the day/cluster grid |
 | **Extraction funnel and success rate** (scoped to clustered articles only) | Where clustering/extraction candidates are right now, and what fraction actually yields usable text (paywalls, layout issues) vs. fails | ✅ Live — `/stats/pipeline`'s `extraction` block |
 | **Preprocessing phase counts** (days clustered, articles extracted, clusters condensed / entity-extracted / contextualized / insight-generated) | Where the backlog is in the six-phase pipeline right now | ✅ Live — under the Preprocessing stage card, and per-day on the cluster grid |
+| **Condensing quality** (avg chunks/titles per cluster, zero-chunk clusters) | Whether condensation is actually distilling clusters down, or leaving some empty/untouched | ✅ Live — `GET /stats/preprocessing-quality`'s `condensing` block, shown as a dial on the dashboard |
+| **Entity quality** (avg canonical entities per cluster, total canonical entities) | Whether entity extraction/canonicalization is finding a reasonable number of entities per story, and how large the canonical registry has grown | ✅ Live — `GET /stats/preprocessing-quality`'s `entities` block |
 | **Clustering quality** (articles/cluster, singleton-cluster rate) | Whether same-story articles are actually being grouped, or the algorithm is over/under-merging | 🔧 Not aggregated into a chart yet — every cluster's member count is already stored, just not summarized |
-| **Contextualization hit rate** (fraction of contextualized clusters with ≥1 similar past cluster) | How often a story genuinely continues a past one vs. is something new — a very high or very low rate on real data would flag the similarity threshold as mistuned | 🔧 Not aggregated yet — `similar_clusters` is stored per cluster today |
-| **Insight yield rate** (relevant insights ÷ clusters assessed) | How much of the contextualized backlog actually turns into an actionable insight vs. gets correctly discarded as not operationally concrete | ✅ Partially live per day (the report calendar shows `relevant_count` / `insights_generated_clusters` per day) — 🔧 aggregating across a month is a small addition |
+| **Contextualization hit rate** (fraction of contextualized clusters with ≥1 similar past cluster, avg top similarity score) | How often a story genuinely continues a past one vs. is something new — a very high or very low rate on real data would flag the similarity threshold as mistuned | ✅ Live — `GET /stats/preprocessing-quality`'s `contextualization` block (`hit_rate_pct`, `avg_top_score`) |
+| **Insight yield rate** (relevant insights ÷ clusters assessed, avg confidence, avg chunk citations) | How much of the contextualized backlog actually turns into an actionable insight vs. gets correctly discarded as not operationally concrete | ✅ Live, aggregated across however much of the backlog has reached phase 6 so far — `GET /stats/preprocessing-quality`'s `insights` block (`yield_rate_pct`) — plus per-day on the report calendar (`relevant_count` / `insights_generated_clusters`) |
 | **Insight coverage** (clusters insight-generated ÷ clusters contextualized) | Whether phase 6 is keeping up with the rest of the backlog, per day | ✅ Visible on the calendar (`· N` = still pending) — 🔧 not yet summarized as a single % |
 | **Pipeline latency** (avg seconds/item, per stage/phase) | How long each stage/phase actually takes on your hardware — used internally for live ETAs already, and now permanently logged per run (see the Logs page) | ✅ Live during a run (the ETA), plus permanent per-run history with a per-phase breakdown |
 | **Duplicate/redundancy rate** | How much of what's ingested is actually the same handful of stories covered repeatedly | ✅ Directly addressed by clustering + condensation now — a real, measured problem before this redesign (see [Known limitations](#known-limitations)) |
@@ -115,7 +119,7 @@ flowchart LR
 |---|---|---|
 | Database | MongoDB | Stores articles, run status/history for every stage, and clusters — including their condensed content, entities, similar-past-cluster links, and generated insights, plus the canonical entity database |
 | Backend | FastAPI (Python) | Scrapes 5 news sources, matches keywords, title-gates, clusters/extracts/condenses/entity-extracts/contextualizes/generates insights, exposes a REST API |
-| Frontend | React + TypeScript (Vite, TanStack Query, Tailwind) | Interactive dashboard — day-by-day cluster browser, cluster detail view (incl. generated insights), title-gate/preprocessing stage controls with live progress, an Archived review page, a Logs/run-history page, and an in-page daily-insights calendar |
+| Frontend | React + TypeScript (Vite, TanStack Query, Tailwind) | Interactive dashboard — the title-gate + six-phase pipeline as one "Harness Trace" signal path, live preprocessing-quality dials, a day-by-day cluster browser, cluster detail view (incl. generated insights), an Archived review page, a Logs/run-history page, and an in-page daily-insights calendar |
 | Data sources | [GNews](https://gnews.io), [NewsAPI.org](https://newsapi.org), [NewsData.io](https://newsdata.io), [Currents](https://currentsapi.services), [TheNewsAPI.com](https://thenewsapi.com) | Five independent news-search APIs, each normalized into a shared shape and merged — see [News sources](#news-sources) |
 | Title gate | Nearest-centroid classifier on `Qwen3-Embedding-0.6B` (`title_gate_model.py`) | Cheap, fast headline-relevance pre-filter, trained offline against the LLM gate's own past decisions — see [The title gate](#the-title-gate) |
 | Content extraction | Playwright + trafilatura | Loads each clustered article in a headless browser and pulls out its main text |
@@ -138,7 +142,7 @@ news-scraper-ymo/
 │   │   ├── main.py                  # FastAPI entrypoint (incl. startup guard/state cleanup for every job)
 │   │   ├── config.py                # Environment settings
 │   │   ├── database.py              # MongoDB connection + indexes
-│   │   ├── models.py                # Data schemas (articles, clusters, entities, run-status docs, reports)
+│   │   ├── models.py                # Data schemas (articles, clusters incl. their insights, entities, run-status docs)
 │   │   ├── repository.py            # All MongoDB (and Pinecone-cleanup) queries
 │   │   ├── keywords.py              # Multilingual keyword configuration
 │   │   ├── title_gate_centroids.npz # The two reference vectors the title-gate classifier compares against
@@ -157,6 +161,15 @@ news-scraper-ymo/
 │   ├── extracted_articles/          # .txt output of successful extractions (not in a Docker volume)
 │   ├── yazaki_news/                 # mongodump snapshot checked into git — see "Syncing the database"
 │   ├── clustering_validation.ipynb  # Train/val/test comparison notebook behind the clustering method choice
+│   ├── title_gate_classifier/       # Trained classifier artifacts (embeddings + the nearest-centroid .pkl)
+│   ├── title_gate_dataset.csv       # Labeled title-gate dataset (1,423 articles, from the LLM gate's own decisions)
+│   ├── unseen_titles_for_colab.csv  # Held-out titles exported for the classifier's Colab training notebook
+│   ├── extract_centroids.py         # Regenerates title_gate_centroids.npz after retraining
+│   ├── migrate_tree_to_entities.py  # One-off: migrated the retired relevance tree into the entity database
+│   ├── backfill_title_gate.py, benchmark_extraction.py, benchmark_title_gate.py,
+│   │   compare_model_vs_llm_gate.py, apply_model_vs_llm_gate_comparison.py, export_title_gate_dataset.py,
+│   │   export_title_gate_tracking.py, export_unseen_titles_for_colab.py
+│   │                                 # Title-gate training/benchmarking/export scripts — see "The title gate"
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
@@ -169,9 +182,12 @@ news-scraper-ymo/
 │   │   ├── pages/                   # Dashboard.tsx (incl. the in-page ReportsSection), ArticleDetail.tsx,
 │   │   │                             # Archived.tsx, Logs.tsx
 │   │   ├── components/
-│   │   │   ├── dashboard/           # StatCards, UpdateButton, TitleGateStageCard, PreprocessingStageCard,
+│   │   │   ├── dashboard/           # StatCards, UpdateButton, HarnessTrace (title-gate + 6-phase signal
+│   │   │   │                         # path, replaced TitleGateStageCard/PreprocessingStageCard 2026-09-16),
+│   │   │   │                         # PreprocessingQualityCard (live per-phase quality dials),
 │   │   │   │                         # DayClusterGrid, ClusterPanel, ClusterDetail, ArticleList,
-│   │   │   │                         # FailedExtractionActions
+│   │   │   │                         # FailedExtractionActions, ChartCard (day/week/month bar charts over
+│   │   │   │                         # useCharts.ts's endpoints — built, not currently rendered by any page)
 │   │   │   ├── reports/             # CalendarGrid, InsightCard (read-only — no generate/stop controls)
 │   │   │   ├── layout/              # AppShell, Sidebar
 │   │   │   ├── ui/                  # Card, Button, ProgressBar, ProgressRing, Badge
@@ -181,9 +197,13 @@ news-scraper-ymo/
 │   ├── vite.config.ts
 │   └── Dockerfile                   # Runs the Vite dev server
 ├── scheduler/                        # run_pipeline.py — the daily Update -> Preprocessing cron
+├── research/                         # compare_model_vs_llm_gate.ipynb — the title-gate classifier's own
+│                                      # Colab training/evaluation notebook (see "The title gate")
 ├── docker-compose.yml                # incl. the ollama + scheduler services and the opt-in ("sync" profile) mongo-restore
 ├── llm_model/                        # Ollama model cache — machine-local, git-ignored, auto-populated on first run
-├── docs/                             # Design notes: completion-plan.md, brainstorm-general-architecture.md, log.md
+├── docs/                             # Design notes: brainstorm-general-architecture.md (redesign decisions),
+│                                      # pipeline-analysis.md (pre-redesign system audit), completion-plan.md,
+│                                      # log.md (dated production log), rag_redesign/ (per-stage design notes)
 └── .gitignore
 ```
 
