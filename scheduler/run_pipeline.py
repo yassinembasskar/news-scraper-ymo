@@ -2,15 +2,31 @@
 Daily pipeline orchestrator.
 
 Runs the full pipeline once a day at PIPELINE_HOUR_UTC:00 UTC, in order:
-    Update -> Extract -> Embed -> Score -> Report
+    Update -> Preprocessing
 
-Each stage is triggered via the same HTTP endpoints the Streamlit
-dashboard's buttons call, then polled until it's no longer in_progress
-before moving to the next stage -- deliberately serial, matching how a
-human clicking the buttons one at a time would drive it. The backend
-itself already refuses to run two heavy stages at once (see
+Each stage is triggered via the same HTTP endpoints the dashboard's
+buttons call, then polled until it's no longer in_progress before moving
+to the next stage -- deliberately serial, matching how a human clicking
+the buttons one at a time would drive it. The backend itself already
+refuses to run two heavy stages at once (see
 repository.get_running_pipeline_stage()), so this script isn't the thing
 enforcing that; it's just what decides *when* to ask for each stage next.
+
+Updated 2026-09-15: there is no separate "Report" stage to trigger
+anymore. This used to run Update -> Extract -> Embed -> Score -> Report,
+calling /articles/extract, /articles/embed, /articles/score, then
+/reports/{date}/generate. /articles/extract (the bulk, no-article-id
+endpoint) had already stopped existing once bulk extraction was folded
+into preprocessing.py — this script was silently failing on that stage
+every night before today. /articles/embed and /articles/score are gone
+for real now too: the per-article embedding stage and the tree-walk
+relativity scorer it fed were retired in favor of cluster-level
+condensation/contextualization. And /reports/{date}/generate is gone as
+well — LLM insight generation is now preprocessing's own phase 6
+(services/llm_insight.assess_cluster, called from services/
+preprocessing.py), so a single /articles/preprocessing run already
+covers clustering through insights end to end; routers/reports.py is
+read-only now, just for viewing what preprocessing already produced.
 
 No cron, no external scheduler library -- just a sleep-until-next-2am
 loop. That's deliberately the simplest thing that works for "one job,
@@ -72,17 +88,7 @@ def run_pipeline() -> None:
     _log("=== Daily pipeline starting ===")
     try:
         _run_stage("Update", "POST", "/update")
-        _run_stage("Extract", "POST", "/articles/extract", "/articles/extract/status")
-        _run_stage("Embed", "POST", "/articles/embed", "/articles/embed/status")
-        _run_stage("Score", "POST", "/articles/score", "/articles/score/status")
-
-        # The report covers the day that just finished, not "today" --
-        # this runs at PIPELINE_HOUR_UTC (early morning), so "today" has
-        # barely started and has almost no articles yet. Yesterday (UTC)
-        # is the day every article scraped/extracted/embedded/scored
-        # above actually belongs to.
-        report_date = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
-        _run_stage("Report", "POST", f"/reports/{report_date}/generate", "/reports/generate/status")
+        _run_stage("Preprocessing", "POST", "/articles/preprocessing", "/articles/preprocessing/status")
     except Exception as e:
         # A stage failing shouldn't crash the scheduler loop -- log it
         # and just wait for tomorrow's run rather than exiting the

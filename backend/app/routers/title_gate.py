@@ -4,8 +4,8 @@ Router: title-gate triggering, status, and stop.
 Kicks off one title-gate pass as a background task and returns
 immediately — mirrors routers/extraction.py exactly (see that file's
 docstring for the general shape). Progress is visible by polling
-GET /articles/title-gate/status, alongside GET /articles/extract/status,
-GET /articles/embed/status, and GET /articles/score/status.
+GET /articles/title-gate/status, alongside the other stages' equivalent
+status endpoints (GET /articles/preprocessing/status, etc.).
 """
 
 from typing import Optional
@@ -29,6 +29,16 @@ class TitleGateStatusResponse(BaseModel):
     total: int
     processed: int
     estimated_minutes_remaining: Optional[float] = None
+    # Day-level view of the backlog (see repository.get_title_gate_day_progress)
+    # — always freshly computed from current DB state, independent of
+    # whether a run is currently active.
+    days_gated: int = 0
+    days_total: int = 0
+    current_day: Optional[str] = None
+    # Unscoped, all-time totals — see repository.get_title_gate_day_progress.
+    gated_total: int = 0
+    archived_total: int = 0
+    articles_total: int = 0
 
 
 @router.post("/articles/title-gate", response_model=TitleGateTriggerResponse)
@@ -69,10 +79,13 @@ def trigger_title_gate(background_tasks: BackgroundTasks):
 @router.get("/articles/title-gate/status", response_model=TitleGateStatusResponse)
 def get_title_gate_run_status():
     """Live progress for the frontend to poll — same shape and same
-    recency-weighted ETA as the other stages' status endpoints."""
+    recency-weighted ETA as the other stages' status endpoints, plus a
+    day-level view of the backlog (days_gated/days_total/current_day),
+    computed fresh from the DB regardless of whether a run is active."""
+    day_progress = repository.get_title_gate_day_progress()
     status = repository.get_title_gate_status()
     if status is None:
-        return TitleGateStatusResponse(in_progress=False, total=0, processed=0)
+        return TitleGateStatusResponse(in_progress=False, total=0, processed=0, **day_progress)
 
     eta_minutes = None
     if status.in_progress and status.avg_seconds_per_article is not None:
@@ -84,6 +97,7 @@ def get_title_gate_run_status():
         total=status.total,
         processed=status.processed,
         estimated_minutes_remaining=eta_minutes,
+        **day_progress,
     )
 
 

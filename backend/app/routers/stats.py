@@ -62,33 +62,47 @@ class ExtractionStageStats(BaseModel):
     successful: int
     failed: int
     archived: int
-    expired: int
     not_extracted: int
-    pending: int
-
-
-class EmbeddingStageStats(BaseModel):
-    total: int  # successful extractions — embedding's actual candidate pool
-    embedded: int
-    not_embedded: int
-    failed: int
-    expired: int
-    pending: int
-
-
-class ScoringStageStats(BaseModel):
-    total: int  # embedded articles — scoring's actual candidate pool
-    scored: int
-    not_scored: int
-    failed: int
     pending: int
 
 
 class PipelineStatsResponse(BaseModel):
     title_gate: TitleGateStageStats
     extraction: ExtractionStageStats
-    embedding: EmbeddingStageStats
-    scoring: ScoringStageStats
+
+
+class CondensingQuality(BaseModel):
+    clusters_processed: int
+    avg_chunks_per_cluster: Optional[float] = None
+    avg_titles_per_cluster: Optional[float] = None
+    zero_chunk_clusters: int
+
+
+class EntityQuality(BaseModel):
+    clusters_processed: int
+    avg_entities_per_cluster: Optional[float] = None
+    total_canonical_entities: int
+
+
+class ContextualizationQuality(BaseModel):
+    clusters_processed: int
+    hit_rate_pct: Optional[float] = None
+    avg_top_score: Optional[float] = None
+
+
+class InsightQuality(BaseModel):
+    clusters_processed: int
+    yield_rate_pct: Optional[float] = None
+    total_insights: int
+    avg_confidence: Optional[float] = None
+    avg_chunk_citations: Optional[float] = None
+
+
+class PreprocessingQualityResponse(BaseModel):
+    condensing: CondensingQuality
+    entities: EntityQuality
+    contextualization: ContextualizationQuality
+    insights: InsightQuality
 
 
 @router.get("/overview", response_model=OverviewResponse)
@@ -100,9 +114,19 @@ def overview():
 
 @router.get("/pipeline", response_model=PipelineStatsResponse)
 def pipeline_stats():
-    """Per-stage status breakdowns (title gating/extraction/embedding/
-    scoring) shown under each pipeline button in the overview bar."""
+    """Per-stage status breakdowns (title gating/extraction) shown under
+    each pipeline button in the overview bar."""
     return stats.get_pipeline_stats()
+
+
+@router.get("/preprocessing-quality", response_model=PreprocessingQualityResponse)
+def preprocessing_quality():
+    """Per-phase quality signals for condensing/entities/contextualization/
+    insights — meant to be watched while a backlog run is in progress
+    (e.g. on the Dashboard), so a mistuned threshold or a broken phase
+    surfaces early instead of only being noticed after the whole backlog
+    has already been spent on it."""
+    return stats.get_preprocessing_quality()
 
 
 @router.get("/chart/day", response_model=ChartResponse)

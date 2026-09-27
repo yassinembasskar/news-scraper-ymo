@@ -1,10 +1,8 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { ExternalLink, Search, X } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/Card";
-import { ScoreBadge } from "@/components/ScoreBadge";
 import { StatusBadge } from "@/components/StatusBadge";
-import { FeedbackButtons } from "./FeedbackButtons";
 import { FailedExtractionActions } from "./FailedExtractionActions";
 import { useArticles } from "@/hooks/useArticles";
 import { displaySourceName } from "@/lib/format";
@@ -34,14 +32,7 @@ export function ArticleList({
     date_to: selectedBucket?.date_to,
   });
 
-  const sorted = useMemo(() => {
-    if (!articles) return [];
-    return [...articles].sort((a, b) => {
-      const aScore = a.relativity_score ?? -1;
-      const bScore = b.relativity_score ?? -1;
-      return bScore - aScore;
-    });
-  }, [articles]);
+  const sorted = articles ?? [];
 
   return (
     <Card>
@@ -109,12 +100,8 @@ export function ArticleList({
                 </p>
                 <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                   <StatusBadge label="Extraction" status={article.ingestion_status} />
-                  <StatusBadge label="Embedding" status={article.embedding_status} />
-                  <StatusBadge label="Scoring" status={article.scored_status} />
                 </div>
               </div>
-              <ScoreBadge score={article.relativity_score} scoredStatus={article.scored_status} />
-              <FeedbackButtons articleId={article.id} scoredStatus={article.scored_status} />
             </div>
             {article.ingestion_status === "Failed" && <FailedExtractionActions articleId={article.id} />}
           </div>

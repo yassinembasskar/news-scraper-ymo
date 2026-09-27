@@ -1,87 +1,90 @@
 @import "tailwindcss";
 
 /* ── Theme tokens ──────────────────────────────────────────────────────
-   Values from the validated dataviz palette (categorical slots 1/2/3 for
-   chart series, slot 7 violet as the dedicated brand/UI accent so button
-   color never gets confused with a data series, status palette for score
-   badges). Dark values are declared under both the OS media query and
+   "Harness trace" identity (2026-09-16 redesign): Yazaki manufactures
+   automotive wiring harnesses, so the palette borrows a blueprint/
+   schematic ground (deep blue-navy, not neutral black) with a copper
+   accent — an actual conductor color — instead of a generic brand hue.
+   Semantic status colors (good/warning/critical) stay distinct from the
+   accent so a "live" copper pulse is never confused with a pass/fail
+   result. Dark values are declared under both the OS media query and
    [data-theme="dark"] so a manual toggle always wins over OS preference,
    in both directions. */
 :root {
   color-scheme: light;
 
-  --page: #f9f9f7;
-  --surface: #fcfcfb;
-  --surface-raised: #ffffff;
-  --border: rgba(11, 11, 11, 0.1);
+  --page: #f3f6f9;
+  --surface: #ffffff;
+  --surface-raised: #edf1f5;
+  --border: #d6e0e8;
 
-  --ink: #0b0b0b;
-  --ink-secondary: #52514e;
-  --ink-muted: #898781;
+  --ink: #1b2733;
+  --ink-secondary: #45566b;
+  --ink-muted: #7c8b9a;
 
-  --brand: #4a3aa7;
+  --brand: #a65f2a;
   --brand-ink: #ffffff;
 
   --series-en: #2a78d6;
-  --series-fr: #eb6834;
+  --series-fr: #c1672c;
   --series-ar: #1baf7a;
 
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #d03b3b;
+  --status-good: #2f7a50;
+  --status-warning: #a6791f;
+  --status-serious: #b8592f;
+  --status-critical: #a63b3b;
 }
 
 @media (prefers-color-scheme: dark) {
   :root:where(:not([data-theme="light"])) {
     color-scheme: dark;
 
-    --page: #0d0d0d;
-    --surface: #1a1a19;
-    --surface-raised: #232322;
-    --border: rgba(255, 255, 255, 0.1);
+    --page: #121821;
+    --surface: #1b232d;
+    --surface-raised: #232d3a;
+    --border: #2c3846;
 
-    --ink: #ffffff;
-    --ink-secondary: #c3c2b7;
-    --ink-muted: #898781;
+    --ink: #e8edf2;
+    --ink-secondary: #8496a6;
+    --ink-muted: #5c6d7c;
 
-    --brand: #9085e9;
-    --brand-ink: #0b0b0b;
+    --brand: #ce8248;
+    --brand-ink: #181009;
 
-    --series-en: #3987e5;
-    --series-fr: #d95926;
-    --series-ar: #199e70;
+    --series-en: #4f9bf0;
+    --series-fr: #e08a4c;
+    --series-ar: #3fc28f;
 
-    --status-good: #0ca30c;
-    --status-warning: #fab219;
-    --status-serious: #ec835a;
-    --status-critical: #e66767;
+    --status-good: #4fa97a;
+    --status-warning: #d8a845;
+    --status-serious: #dd7a4d;
+    --status-critical: #d2695f;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --page: #0d0d0d;
-  --surface: #1a1a19;
-  --surface-raised: #232322;
-  --border: rgba(255, 255, 255, 0.1);
+  --page: #121821;
+  --surface: #1b232d;
+  --surface-raised: #232d3a;
+  --border: #2c3846;
 
-  --ink: #ffffff;
-  --ink-secondary: #c3c2b7;
-  --ink-muted: #898781;
+  --ink: #e8edf2;
+  --ink-secondary: #8496a6;
+  --ink-muted: #5c6d7c;
 
-  --brand: #9085e9;
-  --brand-ink: #0b0b0b;
+  --brand: #ce8248;
+  --brand-ink: #181009;
 
-  --series-en: #3987e5;
-  --series-fr: #d95926;
-  --series-ar: #199e70;
+  --series-en: #4f9bf0;
+  --series-fr: #e08a4c;
+  --series-ar: #3fc28f;
 
-  --status-good: #0ca30c;
-  --status-warning: #fab219;
-  --status-serious: #ec835a;
-  --status-critical: #e66767;
+  --status-good: #4fa97a;
+  --status-warning: #d8a845;
+  --status-serious: #dd7a4d;
+  --status-critical: #d2695f;
 }
 
 @theme {
@@ -106,7 +109,9 @@
   --color-status-serious: var(--status-serious);
   --color-status-critical: var(--status-critical);
 
-  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Big Shoulders Display", "Arial Narrow", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
 }
 
 body {
@@ -120,4 +125,35 @@ body {
 
 * {
   box-sizing: border-box;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes harness-flow {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: -16px 0;
+  }
+}
+
+@keyframes harness-pulse {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.7);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .harness-live-wire,
+  .harness-live-pin::after {
+    animation: none !important;
+  }
 }

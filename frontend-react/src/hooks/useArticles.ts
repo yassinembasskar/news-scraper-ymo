@@ -17,36 +17,6 @@ export function useArticle(articleId: string | undefined) {
   });
 }
 
-export function useTreeNodes() {
-  return useQuery({
-    queryKey: ["tree-nodes"],
-    queryFn: api.getTreeNodes,
-    staleTime: Infinity, // the tree only changes with a deploy, not worth re-polling
-  });
-}
-
-export function useRelativityFeedback(articleId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (direction: "more" | "less") => api.submitRelativityFeedback(articleId, direction),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["articles"] });
-      queryClient.invalidateQueries({ queryKey: ["article", articleId] });
-    },
-  });
-}
-
-export function useRescoreArticle(articleId: string) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: () => api.rescoreArticle(articleId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["articles"] });
-      queryClient.invalidateQueries({ queryKey: ["article", articleId] });
-    },
-  });
-}
-
 export function useRetryExtraction() {
   const queryClient = useQueryClient();
   return useMutation({

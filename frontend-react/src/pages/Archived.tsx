@@ -20,7 +20,7 @@ export default function Archived() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-ink">Archived</h1>
+        <h1 className="font-display text-3xl font-bold uppercase tracking-wide text-ink">Archived</h1>
         <p className="text-sm text-ink-muted">
           Articles the title-gate LLM judged unable to affect the tracked business — never extracted, embedded, or
           scored. Disarchive one if the gate got it wrong, or flush the whole list to delete them permanently.

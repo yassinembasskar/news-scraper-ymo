@@ -1,34 +1,36 @@
 """
-LLM Insight client — the reusable core of the daily-report (Stage 5)
-pipeline, extracted from the scratch validation done during that stage's
-design.
+LLM Insight client — the reusable core of the LLM-backed pipeline stages,
+extracted from the scratch validation done during the original per-article
+report stage's design.
 
-Three functions, all hitting the containerized Ollama service
+Functions, all hitting the containerized Ollama service
 (qwen2.5:7b-instruct-q4_K_M) over HTTP:
-  - gate_title(): a fast, title-only pre-filter run by the scraper right
-    after a new article is found, before the (expensive) extraction step —
-    "could this headline plausibly concern anything this deployment
-    tracks?" Deliberately shallow (short prompt, small context, no
-    business-logic doc) so it stays cheap on CPU; biased to say yes when
-    unsure, since a false negative here means the article is archived and
-    never reaches extraction/scoring/reports at all. The careful judgment
-    still happens later, on full text, in relativity scoring and assess().
-  - translate_to_english(): translates a non-English article to English,
-    because testing showed the model reliably judges relevance in English
-    but silently misses the same clearly-relevant event when it's in Arabic
-    (confirmed against a ground-truth case that 8 English framings caught
-    and the Arabic original did not). Returns (title, body) separately, via
-    schema-constrained output so the split is reliable. The caller
-    (services/report_job.py) caches the result on the article so this only
-    runs once per non-English article, not on every report run.
-  - assess(): one already-English article in, a list of structured insight
-    dicts out (0 or 1 element — a per-article call, never a batch, because
-    batch calls were found to make the model lazily return an empty array
-    and skip reasoning entirely once ~4 articles were mixed together).
-    Translation is NOT done here — the caller passes English text (original,
-    or the cached translation).
+  - gate_title(): a fast, title-only pre-filter — "could this headline
+    plausibly concern anything this deployment tracks?" Deliberately
+    shallow (short prompt, small context, no business-logic doc) so it
+    stays cheap on CPU; biased to say yes when unsure, since a false
+    negative here means the article is archived and never reaches
+    extraction/preprocessing/insights at all. Not the live gate anymore
+    (see services/title_gate.py) — kept as the reference judgment periodic
+    comparison batches check the embedding classifier against.
+  - assess_cluster(): preprocessing phase 6 (services/preprocessing.py) —
+    one condensed cluster's chunks in (plus its similar_clusters context),
+    a list of structured insight dicts out, each citing which chunk
+    indices support it. Replaced assess()/translate_to_english() (removed
+    2026-09-15, see docs/completion-plan.md): those judged one already-
+    English article at a time, once per report generation; this judges an
+    entire clustered story at once, as a normal preprocessing phase, and
+    can actually use similar_clusters (an article-level call never had
+    that context). Chunks are NOT translated to English first — a
+    deliberate scope cut versus the old per-article flow (see this
+    function's docstring for why, and the README's Known limitations).
+  - summarize_cluster(): an earlier, abstractive cluster-summary attempt
+    (superseded by services/cluster_condenser.py's non-LLM extractive
+    condensation for being too slow on CPU) — kept unused, same "future
+    reconsideration" treatment as the LLM title gate above.
 
-Design decisions baked in here, all validated during Stage 3:
+Design decisions baked in here, all validated during the original
+per-article report stage's design and still true of assess_cluster():
   - JSON-Schema-constrained output (Ollama's `format`), not just
     format:"json" — the latter guarantees valid JSON but not the required
     shape (it once returned {} instead of []).
@@ -38,8 +40,8 @@ Design decisions baked in here, all validated during Stage 3:
     generation; a low temperature stabilizes the concerned_param field
     choice, which wobbled at the chat default.
 
-No Mongo access here — orchestration (which articles, storing results,
-progress) lives in services/report_job.py.
+No Mongo access here — orchestration (which clusters, storing results,
+progress) lives in services/preprocessing.py.
 """
 
 import json
@@ -55,11 +57,6 @@ _APP_DIR = Path(__file__).resolve().parents[1]
 BUSINESS_LOGIC_PATH = _APP_DIR / "llm_insight_business_logic.md"
 SAP_ATTRIBUTES_PATH = _APP_DIR / "llm_insight_sap_attributes.md"
 
-# Guardrail against a pathologically long article overflowing num_ctx even
-# with the system prompt (~2.9k tokens) accounted for. ~8000 chars is
-# roughly 2000-2600 tokens, leaving comfortable headroom inside 8192.
-MAX_CONTENT_CHARS = 8000
-
 # On this hardware (CPU-only, no GPU — see docker-compose.yml's ollama
 # service) a single call was observed taking the full previous 300s budget
 # and still not finishing. 600s gives slow-but-working calls room to
@@ -67,7 +64,7 @@ MAX_CONTENT_CHARS = 8000
 # truly stuck still gets killed rather than hanging forever.
 REQUEST_TIMEOUT = 600
 
-_INSIGHT_SCHEMA = {
+_CLUSTER_INSIGHT_SCHEMA = {
     "type": "array",
     "items": {
         "type": "object",
@@ -77,20 +74,19 @@ _INSIGHT_SCHEMA = {
             "concerned_param": {"type": "string"},
             "effect": {"type": "string", "enum": ["positive", "negative", "neutral"]},
             "recommended_action": {"type": "string"},
+            "chunk_indices": {"type": "array", "items": {"type": "integer"}},
         },
-        "required": ["title", "confidence", "concerned_param", "effect", "recommended_action"],
+        "required": [
+            "title", "confidence", "concerned_param", "effect",
+            "recommended_action", "chunk_indices",
+        ],
     },
 }
 
-# Translating to {title, body} under a schema (rather than a free-text blob
-# we'd have to parse back apart) makes the title/body split reliable.
-_TRANSLATION_SCHEMA = {
+_SUMMARY_SCHEMA = {
     "type": "object",
-    "properties": {
-        "title": {"type": "string"},
-        "body": {"type": "string"},
-    },
-    "required": ["title", "body"],
+    "properties": {"summary": {"type": "string"}},
+    "required": ["summary"],
 }
 
 _GATE_SCHEMA = {
@@ -124,10 +120,15 @@ def _system_prompt() -> str:
     return f"{business_logic}\n\n## SAP attribute list (authoritative)\n\n{sap_attributes}"
 
 
-def _chat(messages: list, fmt=None, temperature: float = 0.2, num_ctx: int = 8192) -> str:
+def _chat(
+    messages: list, fmt=None, temperature: float = 0.2, num_ctx: int = 8192, timeout: int = REQUEST_TIMEOUT
+) -> str:
     """One Ollama /api/chat call, non-streaming. Returns the assistant
     message content string. Raises on HTTP error (the caller decides
-    whether one article's failure aborts the run — it doesn't)."""
+    whether one article's failure aborts the run — it doesn't). `timeout`
+    defaults to the fixed REQUEST_TIMEOUT, but assess_cluster() passes a
+    per-call value scaled to how much content is actually in the prompt —
+    see SECONDS_PER_CHUNK."""
     payload = {
         "model": settings.ollama_model,
         "messages": messages,
@@ -139,33 +140,63 @@ def _chat(messages: list, fmt=None, temperature: float = 0.2, num_ctx: int = 819
     response = requests.post(
         f"{settings.ollama_host}/api/chat",
         json=payload,
-        timeout=REQUEST_TIMEOUT,
+        timeout=timeout,
     )
     response.raise_for_status()
     return response.json()["message"]["content"]
 
 
-def translate_to_english(title: str, content: str) -> Tuple[str, str]:
-    """Translates a non-English article to English. Returns
-    (translated_title, translated_body) — the caller caches these on the
-    article and later feeds "Title: <t>\\n\\n<body>" into assess()."""
-    content = (content or "")[:MAX_CONTENT_CHARS]
+# Per-member content cap when building the multi-article summarization
+# prompt — a cluster can have many members; capping each one (rather than
+# the whole prompt) keeps every member at least partially represented
+# instead of the first one eating the whole context budget.
+SUMMARY_MEMBER_CONTENT_CHARS = 1500
+# Caps how many member articles actually go into the prompt — beyond this,
+# more members mostly add redundant detail (it's the same story) rather
+# than new information, and it keeps the prompt bounded regardless of how
+# large a cluster gets.
+SUMMARY_MAX_MEMBERS = 8
+
+
+def summarize_cluster(members: List[Tuple[str, str]]) -> str:
+    """Summarizes a cluster of same-story articles into one short
+    paragraph. `members` is [(title, content), ...] for the cluster's
+    successfully-extracted articles (see services/preprocessing.py) —
+    content from a Failed extraction isn't available to summarize, so
+    those members are simply absent from the prompt, not represented by
+    empty text.
+
+    Deliberately abstractive (one written-from-scratch summary, not a
+    copy of any single source) — unlike the report stage's per-article
+    assess(), which never blends facts across sources because doing so
+    there would fabricate a claim no single source made, blending
+    multiple accounts of the SAME event into one paragraph is the actual
+    point of this function, not a risk to avoid. The prompt still asks
+    the model to flag rather than silently resolve any factual
+    disagreement between sources."""
+    selected = members[:SUMMARY_MAX_MEMBERS]
+    sources = "\n\n".join(
+        f"### Source {i + 1}\nTitle: {title}\n\n{(content or '')[:SUMMARY_MEMBER_CONTENT_CHARS]}"
+        for i, (title, content) in enumerate(selected)
+    )
     raw = _chat(
         messages=[
             {
                 "role": "system",
                 "content": (
-                    "Translate the following news article to English. Return "
-                    "the translated title and body — a faithful translation "
-                    "only, no commentary or notes."
+                    "The following are multiple news sources covering the same "
+                    "story. Write one concise, factual summary (2-4 sentences) "
+                    "of the story they describe together. If the sources "
+                    "disagree on a specific fact (a number, a date, a name), "
+                    "note the disagreement rather than silently picking one."
                 ),
             },
-            {"role": "user", "content": f"Title: {title}\n\n{content}"},
+            {"role": "user", "content": sources},
         ],
-        fmt=_TRANSLATION_SCHEMA,
+        fmt=_SUMMARY_SCHEMA,
     )
     parsed = json.loads(raw)
-    return parsed.get("title", title), parsed.get("body", content)
+    return parsed.get("summary", "")
 
 
 def gate_title(title: str, language: str) -> bool:
@@ -203,19 +234,105 @@ def gate_title(title: str, language: str) -> bool:
     return bool(parsed.get("relevant", True))
 
 
-def assess(title: str, content: str) -> List[dict]:
-    """Assesses one already-English article against the business-logic
-    rules. Returns a list of insight dicts — normally 0 (not relevant) or 1
-    (relevant) element. Each dict matches ReportInsight's LLM-produced
-    fields (title, confidence, concerned_param, effect, recommended_action);
-    the caller attaches article_id/source_title. Does NOT translate — pass
-    English text (the original, or a cached translation)."""
-    content = (content or "")[:MAX_CONTENT_CHARS]
+# Character budget for the numbered chunk block fed to assess_cluster() —
+# guards against overflowing num_ctx (8192 tokens) once the ~2.9k-token
+# system prompt is accounted for; ~8000 chars is roughly 2000-2600 tokens,
+# leaving comfortable headroom. A cluster can have up to
+# cluster_condenser.CONDENSE_MAX_CHUNKS (100)
+# chunks; rather than raise the budget to fit all of them, extra chunks
+# beyond it are simply left out of the prompt (see _build_chunk_block) —
+# they're the ones MMR selected last, i.e. the least additionally distinct
+# from what's already included, so dropping them costs the least.
+MAX_CLUSTER_CONTENT_CHARS = 8000
+
+# Per-call timeout for assess_cluster(), scaled to how many chunks actually
+# made it into the prompt rather than a fixed budget — measured live
+# (2026-09-15): a real 24-chunk cluster took ~484s (~20.2s/chunk), and a
+# real 90-chunk cluster exceeded the old fixed 600s REQUEST_TIMEOUT
+# outright. A fixed timeout either wastes time waiting on small clusters
+# or kills large ones that were genuinely still working — scaling it to
+# the actual prompt size (via the chunk count _build_chunk_block reports,
+# which already accounts for MAX_CLUSTER_CONTENT_CHARS truncation) tracks
+# the real cost driver instead.
+SECONDS_PER_CHUNK = 20
+
+# Flat safety margin added on top of SECONDS_PER_CHUNK x chunk count. The
+# 20s/chunk rate itself came from a single measurement with zero slack
+# (484s actual vs. 480s a bare 20x24 would compute) — without this, that
+# exact call would have been killed ~4s before it actually finished. This
+# doesn't fix the underlying slowness, just stops normal call-to-call
+# variance around the measured average from being misread as failures.
+TIMEOUT_BUFFER_SECONDS = 100
+
+
+def _build_chunk_block(chunks: List[str]) -> Tuple[str, int]:
+    """Numbers every chunk (`[i] text`, matching the index assess_cluster()
+    asks the model to cite back) up to MAX_CLUSTER_CONTENT_CHARS, keeping
+    as many whole chunks as fit rather than truncating mid-chunk. Returns
+    (block, count) — count is how many chunks actually made it in, the
+    basis for assess_cluster()'s dynamic timeout (SECONDS_PER_CHUNK)."""
+    lines: List[str] = []
+    total = 0
+    for i, chunk in enumerate(chunks):
+        line = f"[{i}] {chunk}"
+        if lines and total + len(line) > MAX_CLUSTER_CONTENT_CHARS:
+            break
+        lines.append(line)
+        total += len(line)
+    return "\n".join(lines), len(lines)
+
+
+def assess_cluster(chunks: List[str], similar_clusters: List[dict]) -> List[dict]:
+    """Assesses one condensed cluster's content chunks against the
+    business-logic rules. Returns a list of insight dicts, each matching
+    ClusterInsight's LLM-produced fields (title, confidence,
+    concerned_param, effect, recommended_action, chunk_indices) — normally
+    0 to a handful of elements, one per distinct concrete operational
+    event the story describes. `chunk_indices` are validated against the
+    real range of `chunks` before being returned: a hallucinated
+    out-of-range index is dropped rather than kept, since a wrong citation
+    is worse than a missing one.
+
+    `similar_clusters` (each a SimilarClusterRef.model_dump()) is passed
+    as context only — related past coverage the model can use to judge
+    whether this is a continuation of an ongoing situation or something
+    new, never something to cite chunk_indices against (it has none of
+    its own chunks here).
+
+    Deliberately does NOT translate non-English chunks first, unlike the
+    per-article flow this replaced — chunks in one cluster can mix
+    languages (different member articles), so there's no single "the
+    article's language" to translate from, and per-chunk translation
+    would reintroduce a per-item LLM round trip this whole condensation-
+    based redesign was built to avoid. The prompt instead tells the model
+    each chunk may be in English, French, or Arabic. Not yet validated
+    against the same kind of real mixed-language test the old per-article
+    translate-first design was (see the README's Known limitations)."""
+    chunk_block, included_count = _build_chunk_block(chunks)
+    if not chunk_block:
+        return []
+
+    if similar_clusters:
+        context_lines = "\n".join(
+            f"- {s['date']}: {s['representative_title']} "
+            f"(similarity {s['score']:.2f}, shared entities: {', '.join(s['shared_entities']) or 'none'})"
+            for s in similar_clusters
+        )
+        context_section = (
+            "\n\n### Related past coverage (context only — these have no "
+            f"chunk indices of their own, never cite them)\n{context_lines}"
+        )
+    else:
+        context_section = ""
+
     user_prompt = (
-        "Here is today's batch of 1 pre-filtered article. Apply the rules "
-        "above and return a single JSON array — only the relevant ones, in "
-        "the specified shape. If none are relevant, return an empty array.\n\n"
-        f"### Article 1\nTitle: {title}\n\n{content}"
+        "Below are the numbered content chunks making up one clustered news "
+        "story. Each chunk may be in English, French, or Arabic — read it "
+        "in its own language. Apply the rules above and return a JSON "
+        "array of the concrete operational events this story describes, "
+        "each with the chunk_indices (the bracketed numbers below) that "
+        "support it. If nothing is operationally relevant, return an "
+        f"empty array.{context_section}\n\n### Chunks\n{chunk_block}"
     )
 
     raw = _chat(
@@ -223,13 +340,18 @@ def assess(title: str, content: str) -> List[dict]:
             {"role": "system", "content": _system_prompt()},
             {"role": "user", "content": user_prompt},
         ],
-        fmt=_INSIGHT_SCHEMA,
+        fmt=_CLUSTER_INSIGHT_SCHEMA,
+        timeout=SECONDS_PER_CHUNK * included_count + TIMEOUT_BUFFER_SECONDS,
     )
     parsed = json.loads(raw)
     # Schema constrains this to a list, but guard anyway — a future model/
-    # Ollama change shouldn't be able to crash the whole report run.
+    # Ollama change shouldn't be able to crash the whole preprocessing run.
     if not isinstance(parsed, list):
         return []
+
+    valid_indices = range(len(chunks))
+    for item in parsed:
+        item["chunk_indices"] = [i for i in item.get("chunk_indices", []) if i in valid_indices]
     return parsed
 
 

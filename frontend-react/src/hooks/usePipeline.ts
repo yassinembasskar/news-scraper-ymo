@@ -1,7 +1,10 @@
-// Hooks for the four background pipeline stages (extract/embed/score/
+// Hooks for the background pipeline stages (title-gate/preprocessing/
 // report-generation) plus the overview/pipeline stat cards. Every stage
 // status query polls itself — fast while a run is in progress, slow
 // otherwise, so a run started from another tab/session is still picked up.
+// The old per-article embedding/scoring stages were retired 2026-09-15
+// (see docs/completion-plan.md) in favor of cluster-level condensation/
+// contextualization, tracked on the Preprocessing card instead.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "@/api/client";
@@ -35,18 +38,32 @@ export function usePipelineStats(fast = false) {
   });
 }
 
-// ── Generic stage (extraction / embedding / scoring) ────────────────────
+// Meant to be watched live while a backlog run is in progress (see
+// repository.get_preprocessing_quality_metrics's docstring) — polls
+// faster whenever preprocessing is actually running, same reasoning as
+// usePipelineStats(fast).
+export function usePreprocessingQuality(fast = false) {
+  return useQuery({
+    queryKey: ["preprocessing-quality"],
+    queryFn: api.getPreprocessingQuality,
+    refetchInterval: fast ? ACTIVE_POLL_MS : IDLE_POLL_MS,
+  });
+}
 
-export type StageName = "titleGate" | "extraction" | "embedding" | "scoring";
+// ── Generic stage (title-gate / preprocessing) ──────────────────────────
+
+export type StageName = "titleGate" | "preprocessing";
 
 const STAGE_API: Record<
   StageName,
   { status: () => Promise<StageStatusResponse>; trigger: () => Promise<unknown>; stop: () => Promise<unknown> }
 > = {
   titleGate: { status: api.getTitleGateStatus, trigger: api.triggerTitleGate, stop: api.stopTitleGate },
-  extraction: { status: api.getExtractionStatus, trigger: api.triggerExtraction, stop: api.stopExtraction },
-  embedding: { status: api.getEmbeddingStatus, trigger: api.triggerEmbedding, stop: api.stopEmbedding },
-  scoring: { status: api.getScoringStatus, trigger: api.triggerScoring, stop: api.stopScoring },
+  preprocessing: {
+    status: api.getPreprocessingStatus,
+    trigger: api.triggerPreprocessing,
+    stop: api.stopPreprocessing,
+  },
 };
 
 export function useStageStatus(stage: StageName) {
@@ -57,21 +74,39 @@ export function useStageStatus(stage: StageName) {
   });
 }
 
-// The four per-stage cards each already poll their own stage-status query;
-// this just reads those same cached results (no extra request) to answer
-// "is anything running right now", so the dashboard can speed up the
+// Same query (and same cache entry, via the shared ["stage-status",
+// "preprocessing"] key) as useStageStatus("preprocessing") — this one is
+// just typed against the richer PreprocessingStatusResponse shape so
+// components can read phase/phase_total/phase_processed/the *_done
+// counters, which STAGE_API's generic StageStatusResponse type erases.
+export function usePreprocessingStatus() {
+  return useQuery({
+    queryKey: ["stage-status", "preprocessing"],
+    queryFn: api.getPreprocessingStatus,
+    refetchInterval: (query) => pollInterval(query.state.data),
+  });
+}
+
+// Same pattern as usePreprocessingStatus() above — shares the
+// ["stage-status", "titleGate"] cache entry with useStageStatus("titleGate"),
+// typed against the richer TitleGateStatusResponse shape for the
+// days_gated/days_total/current_day fields.
+export function useTitleGateStatus() {
+  return useQuery({
+    queryKey: ["stage-status", "titleGate"],
+    queryFn: api.getTitleGateStatus,
+    refetchInterval: (query) => pollInterval(query.state.data),
+  });
+}
+
+// The per-stage cards each already poll their own stage-status query; this
+// just reads those same cached results (no extra request) to answer "is
+// anything running right now", so the dashboard can speed up the
 // pipeline-stats poll to match while a run is active.
 export function useAnyStageRunning() {
   const titleGate = useStageStatus("titleGate");
-  const extraction = useStageStatus("extraction");
-  const embedding = useStageStatus("embedding");
-  const scoring = useStageStatus("scoring");
-  return Boolean(
-    titleGate.data?.in_progress ||
-      extraction.data?.in_progress ||
-      embedding.data?.in_progress ||
-      scoring.data?.in_progress,
-  );
+  const preprocessing = useStageStatus("preprocessing");
+  return Boolean(titleGate.data?.in_progress || preprocessing.data?.in_progress);
 }
 
 export function useStageActions(stage: StageName) {

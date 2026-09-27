@@ -19,6 +19,8 @@ db: Database = client[settings.mongo_db_name]
 
 articles: Collection = db["articles"]
 meta: Collection = db["meta"]
+clusters: Collection = db["clusters"]
+entities: Collection = db["entities"]
 
 
 def init_indexes() -> None:
@@ -48,6 +50,16 @@ def init_indexes() -> None:
     # Multikey index: supports the keyword filter and the
     # "most recurrent keyword per day" aggregation.
     articles.create_index([("matched_keywords", ASCENDING)])
+
+    # Supports listing/filtering clusters by day (services/preprocessing.py).
+    # cluster_id (the collection's _id) is already indexed/unique by default.
+    clusters.create_index([("date", ASCENDING)])
+
+    # Supports entity_extraction.canonicalize_entities()'s per-mention
+    # lookup of "every existing entity of this NER type" — the composite
+    # _id ("GROUP:name") is already indexed/unique by default, but that
+    # doesn't help a query scoped to entity_group alone.
+    entities.create_index([("entity_group", ASCENDING)])
 
 
 def ping() -> bool:

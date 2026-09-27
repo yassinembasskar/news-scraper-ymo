@@ -4,8 +4,8 @@ import { ThemeProvider } from "@/lib/theme";
 import { AppShell } from "@/components/layout/AppShell";
 import Dashboard from "@/pages/Dashboard";
 import ArticleDetail from "@/pages/ArticleDetail";
-import Reports from "@/pages/Reports";
 import Archived from "@/pages/Archived";
+import Logs from "@/pages/Logs";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -25,8 +25,8 @@ export default function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/articles/:id" element={<ArticleDetail />} />
-              <Route path="/reports" element={<Reports />} />
               <Route path="/archived" element={<Archived />} />
+              <Route path="/logs" element={<Logs />} />
             </Routes>
           </AppShell>
         </BrowserRouter>

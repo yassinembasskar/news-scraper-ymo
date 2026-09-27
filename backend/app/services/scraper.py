@@ -229,6 +229,7 @@ def run_scrape() -> ScrapeSummary:
         excluded_articles=summary.excluded_articles,
         malformed_articles=summary.malformed_articles,
         errors=summary.errors,
+        duration_seconds=(datetime.now(timezone.utc) - now).total_seconds(),
     )
 
     return summary

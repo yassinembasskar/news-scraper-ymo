@@ -1,8 +1,8 @@
 # 📰 News Intelligence & Business-Relevance Platform
 
-An automated news intelligence pipeline that continuously tracks what's being said — in **multiple languages at once** — about the companies, competitors, and logistics networks a business depends on. It doesn't just collect articles: it builds a **semantic index** of everything it finds and **automatically scores how relevant each one actually is** against a hand-built relevance tree, turning a raw news firehose into something ranked and reasoned-over by meaning, not just keyword matches. A **local LLM** (no external AI API — runs fully offline, on your own hardware) then turns each day's most relevant articles into a **daily insight report**: a short, structured assessment of which concrete operational parameter each event affects, in which direction, and what to do about it.
+An automated news intelligence pipeline that continuously tracks what's being said — in **multiple languages at once** — about the companies, competitors, and logistics networks a business depends on. It doesn't just collect articles: it groups same-day coverage of the same story into a single cluster, condenses each cluster down to its non-redundant substance, extracts and tracks the real-world entities involved across every cluster it ever appears in, and links each story to the earlier clusters most likely to be a related past event. A **local LLM** (no external AI API — runs fully offline, on your own hardware) then turns each day's articles into a **daily insight report**: a short, structured assessment of which concrete operational parameter each event affects, in which direction, and what to do about it.
 
-Every part of *what* the platform tracks and *how* it judges relevance — keywords, the relevance taxonomy, the LLM's business rules — lives in a handful of plain config files, not in application code. This repo ships with a **working reference configuration** built for one real deployment (a Yazaki Morocco automotive-supply-chain use case) so the whole pipeline is demonstrably functional end to end, not a template with a business logic gap in the middle. Repointing it at a different company/industry means editing those config files — see [Adapting this to your organization](#adapting-this-to-your-organization) — not touching the backend, frontend, or pipeline logic.
+Every part of *what* the platform tracks and *how* it judges relevance — keywords, the LLM's business rules — lives in a handful of plain config files, not in application code. This repo ships with a **working reference configuration** built for one real deployment (a Yazaki Morocco automotive-supply-chain use case) so the whole pipeline is demonstrably functional end to end, not a template with a business logic gap in the middle. Repointing it at a different company/industry means editing those config files — see [Adapting this to your organization](#adapting-this-to-your-organization) — not touching the backend, frontend, or pipeline logic.
 
 ---
 
@@ -15,7 +15,7 @@ No company operates in isolation. Almost every business has some version of the 
 - **Suppliers and logistics** — a port backlog, a shipping-lane disruption, or a key supplier's plant issue can delay materials in or goods out, often with days or weeks of lead time before it's felt operationally.
 - **Industry-wide shocks** — sector-specific disruptions (shortages, regulatory shifts, macro events) repeatedly cause knock-on effects across an entire industry.
 
-Relevant news about all of the above is published continuously, often in multiple languages, across hundreds of sources — no one person can manually monitor all of it every day, and not every article that *mentions* a tracked name is actually *relevant*. This platform automates both the monitoring and the triage: it turns "read the news yourself and hope you didn't miss anything" into a ranked, reasoned, and eventually LLM-summarized stream, giving earlier visibility into risk, competitor activity, and customer news than manual monitoring realistically can — the kind of early warning that turns a "we found out too late" situation into "we saw this coming."
+Relevant news about all of the above is published continuously, often in multiple languages, across hundreds of sources — no one person can manually monitor all of it every day, and not every article that *mentions* a tracked name is actually *relevant*. This platform automates both the monitoring and the triage: it turns "read the news yourself and hope you didn't miss anything" into a deduplicated, clustered, contextualized, and LLM-summarized stream, giving earlier visibility into risk, competitor activity, and customer news than manual monitoring realistically can — the kind of early warning that turns a "we found out too late" situation into "we saw this coming."
 
 **The included reference configuration** points all of this at a real example: Yazaki Morocco's automotive supply chain — its OEM customers (BMW, Renault/Dacia, Stellantis, Ford, JLR, Mercedes, Toyota, Honda, Nissan, Volvo), its direct competitors (Sumitomo Electric, Leoni, Aptiv, Lear, Motherson, Kromberg & Schubert, Draexlmaier), and the ports/shipping lanes its EMEA manufacturing footprint depends on (Tanger Med, Algeciras, Suez/Red Sea, and others). It's there to prove the pipeline works end to end against a real domain, not as the platform's actual scope.
 
@@ -25,20 +25,19 @@ Relevant news about all of the above is published continuously, often in multipl
 
 1. **Searches for news** matching a curated keyword list — company names, places, logistics terms, whatever matters to your configuration — across as many languages as you configure, pulling from **five independent free news APIs at once** (GNews, NewsAPI.org, NewsData.io, Currents, TheNewsAPI.com) — see [News sources](#news-sources) for signup links and what each one adds.
 2. **Filters out noise** — irrelevant matches (e.g. job postings) are automatically excluded, and duplicate articles (the same story picked up by multiple keyword searches, or independently found by more than one of the five sources) are deduplicated.
-3. **Stores everything in MongoDB**, tagged with exactly which keyword(s) each article matched.
-4. **Presents an interactive dashboard** where you can:
+3. **Title-gates every new article** — before any expensive work happens, an embedding classifier judges whether the headline could plausibly matter to the tracked business. A title that fails is archived immediately (never extracted, clustered, or reported on); everything else proceeds. See [The title gate](#the-title-gate).
+4. **Stores everything in MongoDB**, tagged with exactly which keyword(s) each article matched.
+5. **Clusters each day's gated articles into stories**, extracts the full text of every clustered article, condenses each cluster down to its deduplicated, non-redundant content, extracts and canonicalizes the real-world entities it mentions, links it to earlier clusters covering a related past event, and generates structured LLM insights straight from that cluster — six automated phases described in [Preprocessing pipeline](#preprocessing-pipeline).
+6. **Presents an interactive dashboard** where you can:
    - See today's and this month's totals and most-mentioned keyword at a glance
-   - Browse activity by day, week, or month, broken down by language
-   - Click any bar in the chart to see exactly which articles are behind it
-   - Filter that article list by keyword (a case-insensitive search across title *and* extracted content, not just the tag it was originally found under)
-   - See every article ranked by **relativity score**, color-coded at a glance
-5. **Updates incrementally** — click "Update now" and it only fetches what's changed since the last successful run, rather than re-fetching everything every time.
-6. **Extracts full article text** — click "Extract articles" and it opens each not-yet-extracted article in a real headless browser, pulls out the main body text (skipping ads/navigation/cookie banners), and saves it. Articles it can't extract automatically (paywalls, cookie walls, unusual page layouts) can be retried or have their content pasted in manually.
-7. **Embeds and indexes article content** — click "Embed articles" and every successfully-extracted article is split into chunks, turned into vector embeddings, and upserted into a Pinecone vector index — the foundation for semantic search, retrieval, and the relevance scoring below.
-8. **Scores every embedded article for relevance** — click "Relativity scoring" and each article's chunk embeddings are walked through a hand-built relevance tree (your industry taxonomy → key entities, suppliers, logistics chokepoints, etc.) to produce a 0–100 relativity score, plus a full explanation of exactly which tree nodes it matched and why.
-9. **Learns from feedback** — "👍 More" / "👎 Less" buttons on any scored article let a human correct the score directly, while also nudging the underlying tree's sensitivity so future articles benefit from the correction too.
-10. **Lets you drill into any article** — "See more" opens a detail page with the full scraped text and a visual breakdown of every relevance-tree node it triggered.
-11. **Generates daily insight reports with a local LLM** — a **Reports** calendar page where you can generate, for any day, an LLM assessment of that day's most-relevant articles: each genuinely operational event becomes a structured card (the affected **operational parameter**, whether the effect is positive/negative/neutral, a confidence %, and a concrete recommended action), while off-topic articles are silently dropped. Non-English articles are **translated to English first** (and the translation is cached), because the model judges relevance far more reliably in English.
+   - Browse a day-by-day grid of every day scraped so far, color-coded by title-gate/clustering status
+   - Click any day to see its clusters, and any cluster to see its condensed content, entities, similar past clusters, generated insights, and full member articles
+   - Trigger and monitor the title-gate and preprocessing stages, each with a live progress bar, ETA, and stop button
+   - Review daily LLM insight reports right below the cluster browser
+7. **Updates incrementally** — click "Update now" and it only fetches what's changed since the last successful run, rather than re-fetching everything every time.
+8. **Generates LLM insights automatically, per cluster** — the last preprocessing phase feeds each contextualized cluster's condensed content (plus its similar-past-clusters context) to a local LLM: each genuinely operational event becomes a structured card (the affected **operational parameter**, whether the effect is positive/negative/neutral, a confidence %, and a concrete recommended action, citing exactly which content chunks support it), while stories with nothing operationally relevant produce none. There's no "Generate" button to click — it runs as part of the normal preprocessing backlog, same as clustering or entity extraction.
+9. **Reviews archived/titled-out articles** — a dedicated page lists every article the title gate archived, with a one-click "disarchive" to send a wrongly-archived article back into the pipeline, and a "flush" to permanently delete the rest.
+10. **Shows pipeline run history** — a Logs page lists every past run of every stage (scrape/title-gate/preprocessing), how long it took, and — for preprocessing — a breakdown of time spent in each of its six phases.
 
 ---
 
@@ -48,16 +47,16 @@ The point of the pipeline isn't just "more articles" — it's a small number of 
 
 | KPI | What it tells you | Status |
 |---|---|---|
-| **Articles/day, articles/month** | Raw ingestion volume, and whether coverage is keeping pace with your keyword list | ✅ Live — overview bar + day/week/month chart |
-| **Language mix** | Whether coverage is balanced across the languages you configured, or skewed to one | ✅ Live — every chart bucket is split by language |
-| **Top keyword** (today / this month) | Which tracked entity is currently generating the most news — an early signal on its own | ✅ Live — overview bar |
-| **Pipeline funnel counts** (extraction / embedding / scoring, each scoped to its own real candidate pool) | Where articles are in the pipeline right now, and where the backlog (if any) is | ✅ Live — under each stage's button |
-| **Extraction / embedding / scoring success rate** | What fraction of attempts actually complete vs. fail (paywalls, layout issues, model errors) — the health of the pipeline itself, not just its throughput | 🔧 Trivial to add — `successful / total` from the funnel counts already returned by `/stats/pipeline` |
-| **Relativity-score distribution** | How much of what's ingested is actually relevant — a pipeline pulling in mostly noise (bottom-heavy distribution) needs its keywords or tree retuned, not more sources | 🔧 Straightforward — `relativity_score` is stored per article today, just not aggregated into a histogram yet |
-| **Report yield rate** (relevant insights ÷ candidate articles assessed) | How much of the "high-relevance" tier actually turns into an actionable insight vs. gets correctly discarded as not operationally concrete | ✅ Partially live per day (the report calendar shows `relevant_count` / `articles_processed` per day) — 🔧 aggregating across a month is a small addition |
-| **Report coverage** (days with a generated report ÷ days with candidate articles) | Whether report generation is keeping up with what's actually available to report on | ✅ Visible on the calendar (marked vs. unmarked days) — 🔧 not yet summarized as a single %  |
-| **Pipeline latency** (avg seconds/article, per stage) | How long each stage actually takes on your hardware — used internally for live ETAs already, worth surfacing historically to catch a stage silently degrading over time | ✅ Live during a run (the ETA) — 🔧 not persisted per historical run yet |
-| **Duplicate/redundancy rate** | How much of the "relevant" tier is actually the same handful of stories covered repeatedly (a real, measured problem in testing — see [Known limitations](#known-limitations)) | 🔧 Not built yet — the natural next metric once deduplication ships |
+| **Articles/day, articles/month** | Raw ingestion volume, and whether coverage is keeping pace with your keyword list | ✅ Live — overview bar |
+| **Title-gate funnel** (gated / archived / passed, day-level completeness) | How much of what's found is judged irrelevant before any expensive work happens, and whether gating has caught up with the scrape backlog | ✅ Live — `/stats/pipeline`'s `title_gate` block, plus per-day markers on the day/cluster grid |
+| **Extraction funnel and success rate** (scoped to clustered articles only) | Where clustering/extraction candidates are right now, and what fraction actually yields usable text (paywalls, layout issues) vs. fails | ✅ Live — `/stats/pipeline`'s `extraction` block |
+| **Preprocessing phase counts** (days clustered, articles extracted, clusters condensed / entity-extracted / contextualized / insight-generated) | Where the backlog is in the six-phase pipeline right now | ✅ Live — under the Preprocessing stage card, and per-day on the cluster grid |
+| **Clustering quality** (articles/cluster, singleton-cluster rate) | Whether same-story articles are actually being grouped, or the algorithm is over/under-merging | 🔧 Not aggregated into a chart yet — every cluster's member count is already stored, just not summarized |
+| **Contextualization hit rate** (fraction of contextualized clusters with ≥1 similar past cluster) | How often a story genuinely continues a past one vs. is something new — a very high or very low rate on real data would flag the similarity threshold as mistuned | 🔧 Not aggregated yet — `similar_clusters` is stored per cluster today |
+| **Insight yield rate** (relevant insights ÷ clusters assessed) | How much of the contextualized backlog actually turns into an actionable insight vs. gets correctly discarded as not operationally concrete | ✅ Partially live per day (the report calendar shows `relevant_count` / `insights_generated_clusters` per day) — 🔧 aggregating across a month is a small addition |
+| **Insight coverage** (clusters insight-generated ÷ clusters contextualized) | Whether phase 6 is keeping up with the rest of the backlog, per day | ✅ Visible on the calendar (`· N` = still pending) — 🔧 not yet summarized as a single % |
+| **Pipeline latency** (avg seconds/item, per stage/phase) | How long each stage/phase actually takes on your hardware — used internally for live ETAs already, and now permanently logged per run (see the Logs page) | ✅ Live during a run (the ETA), plus permanent per-run history with a per-phase breakdown |
+| **Duplicate/redundancy rate** | How much of what's ingested is actually the same handful of stories covered repeatedly | ✅ Directly addressed by clustering + condensation now — a real, measured problem before this redesign (see [Known limitations](#known-limitations)) |
 | **API quota usage** | Headroom left on the news-source rate limit (relevant on any capped free/paid tier) | 🔧 Not tracked yet — a simple counter against the source's daily cap |
 
 None of this requires touching the pipeline logic to add — it's all read off data the app already writes to Mongo. This is the section to extend first if you're evaluating this platform for a KPI dashboard / reporting use case, rather than the interactive triage UI it ships with today.
@@ -66,17 +65,17 @@ None of this requires touching the pipeline logic to add — it's all read off d
 
 ## Adapting this to your organization
 
-The pipeline (scrape → extract → embed → score → LLM report) is generic. Everything that makes it *about Yazaki specifically* lives in a small, fixed set of plain-text/config files — none of it is hardcoded in `backend/app/services/` or `backend/app/routers/`. To repoint the whole platform at a different company or industry, this is the complete list of what to touch:
+The pipeline (scrape → title-gate → cluster → extract → condense → extract entities → contextualize → LLM report) is generic. Everything that makes it *about Yazaki specifically* lives in a small, fixed set of plain-text/config files — none of it is hardcoded in `backend/app/services/` or `backend/app/routers/`. To repoint the whole platform at a different company or industry, this is the complete list of what to touch:
 
 | File | What it defines | Effort to replace |
 |---|---|---|
 | `backend/app/keywords.py` | Search terms per language — company names, competitors, ports/logistics terms, disruption-signal phrases | Rewrite the lists; keep the per-language + exclude-words structure |
-| `backend/app/yazaki_tree_id_map.json` + `embed_tree_labels.py` | The relevance taxonomy (root → categories → leaf entities) and its per-language embeddings | Redefine the tree's structure/labels, then re-run `embed_tree_labels.py` once to compute new embeddings — no manual vector work |
 | `backend/app/llm_insight_business_logic.md` | The LLM's rules for judging relevance and filling out a report card, including any company-context primer | Rewrite in plain English/Markdown — no code, no prompt-engineering framework |
 | `backend/app/llm_insight_sap_attributes.md` | The strict list of "operational parameters" (SAP fields in the reference config) the LLM is allowed to cite | Swap for your own domain's field list — SAP-specific naming isn't required by anything downstream, it's just what the reference config models |
 | `PINECONE_INDEX_NAME`, `MONGO_DB_NAME` | The vector index and database name (currently `yazaki`/`yazaki_news`) | Rename freely — referenced from `.env`/config, not hardcoded elsewhere |
+| `title_gate_centroids.npz` (`backend/app/`) | The two reference vectors ("relevant" / "archived") the title-gate classifier compares every new title against | Retrain against your own domain's past title-gate decisions — see [The title gate](#the-title-gate); starting from the LLM gate function (`llm_insight.gate_title`, still callable) is the fastest path to a first batch of labels |
 
-Everything else — the FastAPI backend, the React dashboard, the extraction/embedding/scoring/report background jobs, the Docker Compose setup — is domain-agnostic and untouched by a re-target. The current repo state still carries the Yazaki name in a few identifiers (directory/collection/index names) as an artifact of the reference deployment it was built against; stripping those is a renaming pass, not a re-architecture.
+Everything else — the FastAPI backend, the React dashboard, the title-gate/preprocessing background jobs, the Docker Compose setup — is domain-agnostic and untouched by a re-target. There is no hand-built relevance taxonomy to maintain anymore (the old `yazaki_tree_id_map.json` tree-walk scorer was retired — see [Known limitations](#known-limitations)); relevance now falls out of title-gating, clustering, and the LLM's own judgment instead of a hand-tuned tree. The current repo state still carries the Yazaki name in a few identifiers (directory/collection/index names) as an artifact of the reference deployment it was built against; stripping those is a renaming pass, not a re-architecture.
 
 ---
 
@@ -94,31 +93,39 @@ flowchart LR
     end
     Sources -->|scrapes, merges, dedupes| Backend["FastAPI Backend"]
     Backend -->|stores / queries| Mongo[("MongoDB")]
-    Backend -->|chunk + embed| Model["Qwen3-Embedding-0.6B\n(sentence-transformers)"]
-    Model -->|vectors| Pinecone[("Pinecone\nvector index")]
-    Pinecone -->|chunk vectors back| Scorer["Relativity scorer\n(relevance tree walk)"]
-    Tree[("yazaki_tree_id_map.json\n+ Mongo threshold overrides")] --> Scorer
-    Scorer -->|score + explanation| Mongo
-    Mongo -->|day's top-scored articles| Reporter["LLM Insight reporter\n(translate + assess)"]
-    Reporter <-->|prompt / JSON| Ollama[("Ollama\nQwen2.5-7B")]
-    Reporter -->|daily insight report| Mongo
+    Backend -->|classify title| Gate["Title-gate classifier\n(nearest-centroid, Qwen embeddings)"]
+    Gate -->|relevant / archived| Mongo
+    Mongo -->|day's gated articles| Cluster["Clustering\n(complete-linkage, per UTC day)"]
+    Cluster -->|extract full text| Extract["Extraction\n(Playwright + trafilatura)"]
+    Extract -->|condense| Condense["Condensation\n(dedup + MMR, extractive)"]
+    Condense -->|chunk embeddings| Pinecone[("Pinecone\nvector index")]
+    Condense -->|NER + canonicalize| Entities["Entity extraction\n(multilingual NER + embedding match)"]
+    Entities -->|entity DB| Mongo
+    Entities -->|find related past clusters| Context["Contextualization\n(centroid similarity x shared entities)"]
+    Pinecone -->|chunk centroids| Context
+    Context -->|similar_clusters| Mongo
+    Mongo -->|contextualized cluster + similar_clusters| Insighter["LLM Insight generation\n(assess_cluster)"]
+    Insighter <-->|prompt / JSON| Ollama[("Ollama\nQwen2.5-7B")]
+    Insighter -->|insights, cited by chunk index| Mongo
     Frontend["React Dashboard"] -->|HTTP requests| Backend
-    User(("User")) -->|views, clicks, feedback| Frontend
+    User(("User")) -->|views, clicks, triggers| Frontend
 ```
 
 | Layer | Technology | Role |
 |---|---|---|
-| Database | MongoDB | Stores articles, scrape/extraction/embedding/scoring status + history, relativity-feedback threshold overrides, cached translations, and generated daily reports |
-| Backend | FastAPI (Python) | Scrapes 5 news sources, matches keywords, extracts article content, chunks + embeds content, scores relevance, generates daily LLM reports, exposes a REST API |
-| Frontend | React + TypeScript (Vite, TanStack Query, Tailwind) | Interactive dashboard — charts, filters, ranked/color-coded article list, per-article extraction/embedding/scoring status badges, extraction + embedding + scoring controls with live progress, failed-extraction recovery, per-article detail page, and a daily-report calendar |
+| Database | MongoDB | Stores articles, run status/history for every stage, and clusters — including their condensed content, entities, similar-past-cluster links, and generated insights, plus the canonical entity database |
+| Backend | FastAPI (Python) | Scrapes 5 news sources, matches keywords, title-gates, clusters/extracts/condenses/entity-extracts/contextualizes/generates insights, exposes a REST API |
+| Frontend | React + TypeScript (Vite, TanStack Query, Tailwind) | Interactive dashboard — day-by-day cluster browser, cluster detail view (incl. generated insights), title-gate/preprocessing stage controls with live progress, an Archived review page, a Logs/run-history page, and an in-page daily-insights calendar |
 | Data sources | [GNews](https://gnews.io), [NewsAPI.org](https://newsapi.org), [NewsData.io](https://newsdata.io), [Currents](https://currentsapi.services), [TheNewsAPI.com](https://thenewsapi.com) | Five independent news-search APIs, each normalized into a shared shape and merged — see [News sources](#news-sources) |
-| Content extraction | Playwright + trafilatura | Loads each article in a headless browser and pulls out its main text |
-| Embedding model | [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) via `sentence-transformers` | Turns article-text chunks into 1024-dimensional vectors, CPU inference, no LangChain |
-| Vector store | [Pinecone](https://www.pinecone.io) | Stores and indexes chunk embeddings (index name: `yazaki`, cosine metric); also the source the scorer reads chunk vectors back from |
-| Relevance tree | `backend/app/yazaki_tree_id_map.json` | A hand-built, fully swappable taxonomy — shipped as ~155 nodes for the Yazaki reference config (Automotive Industry → OEMs → specific manufacturers, ports, logistics, etc.) — each node with a per-language embedding and a similarity threshold |
-| Insight LLM | [Qwen2.5-7B-Instruct](https://ollama.com/library/qwen2.5) (`q4_K_M`) via [Ollama](https://ollama.com) | Translates non-English articles and produces the structured daily insight assessments; runs in its own container, CPU inference, model auto-downloaded on first start into a local cache |
+| Title gate | Nearest-centroid classifier on `Qwen3-Embedding-0.6B` (`title_gate_model.py`) | Cheap, fast headline-relevance pre-filter, trained offline against the LLM gate's own past decisions — see [The title gate](#the-title-gate) |
+| Content extraction | Playwright + trafilatura | Loads each clustered article in a headless browser and pulls out its main text |
+| Embedding model | [Qwen3-Embedding-0.6B](https://huggingface.co/Qwen/Qwen3-Embedding-0.6B) via `sentence-transformers` | One shared model instance for title embeddings, condensation dedup/MMR, entity canonicalization, and contextualization — 1024-dimensional vectors, CPU inference, no LangChain |
+| Clustering | SciPy (complete-linkage agglomerative, cosine distance) | Groups one UTC day's gated articles into same-story clusters — see [Preprocessing pipeline](#preprocessing-pipeline) |
+| NER model | [Davlan/bert-base-multilingual-cased-ner-hrl](https://huggingface.co/Davlan/bert-base-multilingual-cased-ner-hrl) via `transformers` | Extracts entity mentions (PER/ORG/LOC/MISC) from each cluster's condensed content, in English/French/Arabic |
+| Vector store | [Pinecone](https://www.pinecone.io) | Stores condensed-chunk embeddings (index name: `yazaki`, cosine metric); contextualization reads chunk vectors back to compute per-cluster centroids |
+| Insight LLM | [Qwen2.5-7B-Instruct](https://ollama.com/library/qwen2.5) (`q4_K_M`) via [Ollama](https://ollama.com) | Judges each contextualized cluster's condensed content against the business-logic rules and produces structured insight cards, each citing the chunk indices that support it; runs in its own container, CPU inference, model auto-downloaded on first start into a local cache |
 | Business logic | `backend/app/llm_insight_business_logic.md` + `llm_insight_sap_attributes.md` | Human-authored, plain-Markdown rules fed to the LLM — how to judge relevance and the strict list of valid operational parameters it may cite; entirely content, no code, to retarget |
-| Orchestration | Docker Compose | Runs all services together with one command; database sync between machines is a separate, explicit opt-in step (see [Syncing the database](#syncing-the-database-between-machines)) |
+| Orchestration | Docker Compose | Runs all services together with one command, plus a `scheduler` service that drives the daily Update → Preprocessing run through the same HTTP endpoints the dashboard uses; database sync between machines is a separate, explicit opt-in step (see [Syncing the database](#syncing-the-database-between-machines)) |
 
 ---
 
@@ -128,48 +135,55 @@ flowchart LR
 news-scraper-ymo/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py                  # FastAPI entrypoint (incl. startup guard/state cleanup for all jobs)
+│   │   ├── main.py                  # FastAPI entrypoint (incl. startup guard/state cleanup for every job)
 │   │   ├── config.py                # Environment settings
 │   │   ├── database.py              # MongoDB connection + indexes
-│   │   ├── models.py                # Data schemas (statuses, run-status docs, scoring/translation/report fields)
+│   │   ├── models.py                # Data schemas (articles, clusters, entities, run-status docs, reports)
 │   │   ├── repository.py            # All MongoDB (and Pinecone-cleanup) queries
 │   │   ├── keywords.py              # Multilingual keyword configuration
-│   │   ├── yazaki_tree_id_map.json  # The relevance tree — ids, labels (en/fr/ar), per-language embeddings, thresholds
-│   │   ├── embed_tree_labels.py     # One-off script that (re)computes the tree's embeddings
+│   │   ├── title_gate_centroids.npz # The two reference vectors the title-gate classifier compares against
 │   │   ├── llm_insight_business_logic.md   # LLM rules: how to judge supply-chain relevance + fill the report JSON
 │   │   ├── llm_insight_sap_attributes.md   # The strict list of SAP parameters the LLM may cite
-│   │   ├── routers/                 # API endpoints (articles, extraction, embedding, scoring, reports, stats, update)
+│   │   ├── routers/                 # API endpoints — articles, extraction (single-retry), title_gate,
+│   │   │                             # preprocessing, reports, stats, logs, update
 │   │   └── services/                # source_client.py (shared shape) + 5 pluggable news-source clients
 │   │                                 # (gnews_client.py, newsapi_org_client.py, newsdata_io_client.py,
 │   │                                 # currents_client.py, thenewsapi_com_client.py), keyword matching,
-│   │                                 # scraping orchestration, stats, extraction, chunking, embedding,
-│   │                                 # relativity scoring, LLM insight + report job
+│   │                                 # scraping orchestration, stats, title_gate + title_gate_model,
+│   │                                 # preprocessing.py (the 6-phase orchestrator) + cluster_condenser.py +
+│   │                                 # entity_extraction.py + contextualization.py, extractor.py (per-article
+│   │                                 # text pull, reused by preprocessing's phase 2), llm_insight.py (also
+│   │                                 # phase 6's assess_cluster())
 │   ├── extracted_articles/          # .txt output of successful extractions (not in a Docker volume)
 │   ├── yazaki_news/                 # mongodump snapshot checked into git — see "Syncing the database"
-│   ├── test_extraction.py           # Standalone Playwright/trafilatura proof-of-concept script
+│   ├── clustering_validation.ipynb  # Train/val/test comparison notebook behind the clustering method choice
 │   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
 ├── frontend-react/
 │   ├── src/
-│   │   ├── App.tsx                  # Router — Dashboard, ArticleDetail, Reports pages
+│   │   ├── App.tsx                  # Router — Dashboard, ArticleDetail, Archived, Logs pages
 │   │   ├── api/                     # client.ts (all backend calls) + types.ts (mirrors backend models)
-│   │   ├── hooks/                   # TanStack Query hooks — useArticles, usePipeline, useReports, useCharts
-│   │   ├── pages/                   # Dashboard.tsx, ArticleDetail.tsx, Reports.tsx
+│   │   ├── hooks/                   # TanStack Query hooks — useArticles, usePipeline, useClusters, useReports,
+│   │   │                             # useArchived, useLogs, useCharts
+│   │   ├── pages/                   # Dashboard.tsx (incl. the in-page ReportsSection), ArticleDetail.tsx,
+│   │   │                             # Archived.tsx, Logs.tsx
 │   │   ├── components/
-│   │   │   ├── dashboard/           # StatCards, PipelineStageCard, ChartCard, ArticleList,
-│   │   │   │                         # FailedExtractionActions, FeedbackButtons, UpdateButton
-│   │   │   ├── reports/             # CalendarGrid, GenerationBanner, InsightCard
+│   │   │   ├── dashboard/           # StatCards, UpdateButton, TitleGateStageCard, PreprocessingStageCard,
+│   │   │   │                         # DayClusterGrid, ClusterPanel, ClusterDetail, ArticleList,
+│   │   │   │                         # FailedExtractionActions
+│   │   │   ├── reports/             # CalendarGrid, InsightCard (read-only — no generate/stop controls)
 │   │   │   ├── layout/              # AppShell, Sidebar
 │   │   │   ├── ui/                  # Card, Button, ProgressBar, ProgressRing, Badge
-│   │   │   ├── ScoreBadge.tsx       # Relativity-score badge
-│   │   │   └── StatusBadge.tsx      # Extraction/embedding/scoring status badge
+│   │   │   └── StatusBadge.tsx      # Extraction-status badge
 │   │   └── lib/                     # utils, format, theme
 │   ├── package.json
 │   ├── vite.config.ts
 │   └── Dockerfile                   # Runs the Vite dev server
-├── docker-compose.yml               # incl. the ollama service + the opt-in ("sync" profile) mongo-restore service
-├── llm_model/                       # Ollama model cache — machine-local, git-ignored, auto-populated on first run
+├── scheduler/                        # run_pipeline.py — the daily Update -> Preprocessing cron
+├── docker-compose.yml                # incl. the ollama + scheduler services and the opt-in ("sync" profile) mongo-restore
+├── llm_model/                        # Ollama model cache — machine-local, git-ignored, auto-populated on first run
+├── docs/                             # Design notes: completion-plan.md, brainstorm-general-architecture.md, log.md
 └── .gitignore
 ```
 
@@ -182,8 +196,8 @@ news-scraper-ymo/
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and running
 - A free GNews API key — [sign up here](https://gnews.io/register) (**required** — the backend won't start without it)
 - (Optional, but recommended) free API keys for the other four news sources — see [News sources](#news-sources) for signup links; the app runs fine with just GNews, each additional key just adds another source's coverage
-- A [Pinecone](https://www.pinecone.io) account and API key, with an index named `yazaki` created (dimension `1024`, metric `cosine`) — needed for both embedding and relativity scoring (the scorer reads chunk vectors back from the same index)
-- (Optional) A Hugging Face token if you ever need to re-download the embedding model — see the note on the model cache below
+- A [Pinecone](https://www.pinecone.io) account and API key, with an index named `yazaki` created (dimension `1024`, metric `cosine`) — condensation writes chunk embeddings here, and contextualization reads them back to compute per-cluster centroids
+- (Optional) A Hugging Face token if you ever need to re-download the embedding or NER model — see the note on the model cache below
 
 ### Setup
 
@@ -209,18 +223,19 @@ news-scraper-ymo/
 
    (`MONGO_URI` is automatically overridden inside Docker — no need to change it for the container setup.)
 
-3. **Seed the embedding model cache (one-time, first setup only).** The Qwen3-Embedding-0.6B model is *not* downloaded during the Docker build — it lives in a persistent named volume (`hf-model-cache`) instead, because some corporate networks block outbound access to `huggingface.co` (see [Known limitations](#known-limitations)). On a machine with normal internet access:
+3. **Seed the model cache (one-time, first setup only).** Neither the embedding model (`Qwen3-Embedding-0.6B`) nor the NER model (`Davlan/bert-base-multilingual-cased-ner-hrl`) is downloaded during the Docker build — they live in a persistent named volume (`hf-model-cache`) instead, because some corporate networks block outbound access to `huggingface.co` (see [Known limitations](#known-limitations)). On a machine with normal internet access:
    ```bash
-   pip install sentence-transformers
+   pip install sentence-transformers transformers
    python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('Qwen/Qwen3-Embedding-0.6B')"
+   python -c "from transformers import pipeline; pipeline('ner', model='Davlan/bert-base-multilingual-cased-ner-hrl')"
    ```
-   Then copy the resulting `~/.cache/huggingface` folder into the running `backend` container's `hf-model-cache` volume via `docker cp` (start the stack first, then copy, then restart backend). If your network already reaches `huggingface.co` fine, you can skip this — the model will simply download on first use instead.
+   Then copy the resulting `~/.cache/huggingface` folder into the running `backend` container's `hf-model-cache` volume via `docker cp` (start the stack first, then copy, then restart backend). If your network already reaches `huggingface.co` fine, you can skip this — each model will simply download on first use instead.
 
 4. **Build and start everything:**
    ```bash
    docker compose up --build
    ```
-   First run will take a few minutes (downloading images, installing dependencies). The **`ollama` service also downloads the insight model** (`qwen2.5:7b-instruct-q4_K_M`, ~4.7 GB) into a local `llm_model/` cache the first time — this happens automatically in the background and only once per machine; the model server reports healthy once it's finished. It starts with whatever's already in the `mongo` volume — see [Syncing the database](#syncing-the-database-between-machines) if you want to load the committed snapshot instead. Subsequent runs are fast — see [Common operations](#common-operations) below.
+   First run will take a few minutes (downloading images, installing dependencies). The **`ollama` service also downloads the insight model** (`qwen2.5:7b-instruct-q4_K_M`, ~4.7 GB) into a local `llm_model/` cache the first time — this happens automatically in the background and only once per machine; the model server reports healthy once it's finished. It starts with whatever's already in the `mongo` volume — see [Syncing the database](#syncing-the-database-between-machines) if you want to load the committed snapshot instead. Subsequent runs are fast — see [Common operations](#common-operations) below. The `scheduler` service also starts, and will run the full pipeline automatically once a day (see [Automated daily runs](#automated-daily-runs)) — nothing extra to configure to get incremental updates.
 
 5. **Open the dashboard:**
    ```
@@ -247,182 +262,143 @@ Articles found by more than one source (or that reappear across overlapping scra
 
 ---
 
-## Using the dashboard
+## The title gate
 
-- **Overview bar** — today's and this month's article totals and top keyword, when data was last refreshed, and the **Update / Extract articles / Embed articles / Relativity scoring** controls (each with a live progress bar + ETA while running, and a "🛑 Stop" button in its place once a run is in flight).
-- **"Update now"** — triggers a fresh scrape across all configured news sources (see [News sources](#news-sources)). Safe to click anytime: if it's already up to date for today, it does nothing rather than wasting API quota. A full run typically takes a few minutes, since each source is deliberately rate-limited on its own free plan and they're queried one after another.
-- **Chart** — pick Day, Week, or Month, and navigate to any specific period (not just the current one). Bars are split by language (English / French / Arabic).
-- **Click any bar** — the panel below updates to show that period's total, top keyword, per-language breakdown, and the actual list of articles, **ranked by relativity score** (highest first; not-yet-scored articles sort to the end).
-- **Keyword filter** — narrows the article list only; it never changes the chart or the summary numbers above it.
-- **Each article's row** shows its title/link, language, publish date, source, extraction/embedding/scoring status, matched keywords, a color-coded relativity score, feedback buttons, and a "See more" link to its detail page.
-- **"📄 Daily Insight Reports"** (link at the top of the dashboard) opens the report calendar — generate and browse per-day LLM insight briefs (see [Daily insight reports](#daily-insight-reports-local-llm)).
+Before a genuinely new article ever reaches clustering/extraction, its title alone is classified: could this headline plausibly matter to the tracked business? A title judged irrelevant is archived immediately (`ingestion_status` → `Archived`) and never proceeds any further; everything else gets `title_gate_status` → `Gated` and becomes a clustering candidate on the next preprocessing run.
+
+**Two mechanisms exist, one live:**
+
+- **The live gate** (`services/title_gate.py`, `services/title_gate_model.py`) is a nearest-centroid classifier on top of the same `Qwen3-Embedding-0.6B` model used everywhere else in this app: one reference vector for titles judged relevant, one for titles judged archived (`title_gate_centroids.npz`), and classifying a new title is just "which centroid is it closer to" (cosine similarity) — no LLM call, no sklearn/pickle dependency in production.
+- **The original gate** (`services/llm_insight.gate_title()`) asks the local Ollama LLM the same question via a short, deliberately shallow prompt (~200 tokens). It's what the embedding classifier was trained on and validated against, and it's kept fully callable — not wired into the live job — specifically so periodic comparison batches (`compare_model_vs_llm_gate.py`, `export_title_gate_dataset.py`) can keep checking the classifier against fresh LLM judgments.
+
+**Why the switch**: at production volume (~500 articles/day), the LLM gate alone cost ~75 minutes/day of CPU time and blocked every other pipeline stage while it ran. The embedding classifier, trained on 1,423 of the LLM gate's own past decisions, measured **99.0% recall** (only 2/196 truly-relevant articles wrongly archived) at **71.1% precision** on a held-out test set — checked again against a much larger, uncontaminated pool of 2,103 further-gated articles at **71.4% agreement**, consistent with the recall-optimized design. Live production throughput: **~1.35s/article, 0 errors** — down from the LLM gate's ~9s/title. Full writeup: `docs/log.md`.
+
+The gate is deliberately biased to say yes when unsure (a false negative here permanently loses the article), and it fails open: if the classifier itself errors, the article is retried on the next run rather than being silently stuck or lost. Archived articles are excluded from the default article list (`GET /articles?include_archived=true` to audit them) and are reviewable on the **Archived** page (disarchive one if the gate got it wrong, or flush the whole list permanently).
+
+Retraining the classifier for a different domain means re-running the LLM gate over enough of your own titles to build a labeled set, then recomputing `title_gate_centroids.npz` (`extract_centroids.py`) — see [Adapting this to your organization](#adapting-this-to-your-organization).
 
 ---
 
-## Article content extraction
+## Preprocessing pipeline
 
-Every article has an `ingestion_status`, separate from whether it's been *found* by the scraper:
+Everything after title-gating — grouping same-story articles, pulling their full text, distilling that down to what's actually informative, tracking the real-world entities involved, connecting a story to its own past, and generating structured LLM insights from it — runs as one background job, `services/preprocessing.py`, in six phases. It shares one Mongo-backed progress/stop mechanism across all six, so the frontend's Preprocessing stage card shows all of them, not just whichever is currently running.
 
-| Status | Meaning |
-|---|---|
-| `No Extraction` | Default state for every newly-scraped article — nothing attempted yet. |
-| `Pending` | An extraction attempt is currently in progress for this article. |
-| `Successful` | Full body text was extracted (or manually pasted) and is stored. |
-| `Failed` | An attempt was made but no usable content came back (paywall, cookie wall, unsupported layout, page didn't load). |
-| `Expired` | Published more than a month ago — content (if any) is purged and it's excluded from future automatic extraction. |
-| `Archived` | The title-gate LLM pre-filter (see below) judged the headline unable to affect the tracked business — never reaches extraction at all. |
+### Phase 1 — Cluster
 
-**"🧹 Extract articles"** (next to "Update now" in the overview bar) starts a background job and returns immediately — it doesn't block the page. Each run:
-1. **Expires** any article published more than a calendar month ago, regardless of its current status, clearing its stored content (and, if it had been embedded, its Pinecone vectors and embedding fields too — see below).
-2. **Extracts** every remaining `No Extraction` article: opens it in a headless Chromium browser (via Playwright), pulls the main body text with `trafilatura`, and on success saves the text both to that article's database row and to `backend/extracted_articles/{title[:40]}.txt`.
-3. `Failed` articles are **not** retried automatically on the next run — that's a deliberate choice, so the job doesn't keep re-attempting articles that structurally can't be extracted. Reload the article list after a minute or two to see progress; articles show `Pending` while being worked on.
+Groups one UTC calendar day's gated articles into same-story clusters: **complete-linkage agglomerative clustering** (SciPy) over L2-normalized title embeddings, cosine distance, cut via the inconsistency-coefficient criterion (`t=1.1`, `depth=2`). A day is only clustered once every article published on it (and every earlier day) has a title-gate decision — clustering an incomplete day would miss whatever's still ungated. A day with a single candidate is its own singleton cluster.
 
-**Title-gate pre-filter** — before a genuinely new article ever reaches extraction, its title alone is passed through a fast LLM relevance check (`services/llm_insight.gate_title()`, same `qwen2.5:7b-instruct-q4_K_M` model as the daily reports, but a short ~200-token prompt instead of a full article). If the model judges the headline clearly unable to affect the tracked business (sports, entertainment, personal news), the article is marked `Archived` immediately and never extracted, embedded, or scored — saving the more expensive downstream stages from wasted work. It's deliberately biased to say yes when unsure (a false negative here permanently loses the article), and it fails open: if the LLM call itself errors, the article is kept, not archived. Archived articles are excluded from the default article list (`GET /articles?include_archived=true` to audit them). Benchmarked against 100 random titles from across the whole collection: **~9s/title** on CPU, **~17.4% archived / ~82.6% relevant**. Spot-checked against a live production run (2026-08-26): a clean ~52-minute window processed 426 articles at **~7.3s/article**, confirming the original benchmark still holds under real load — an earlier reading from the same run looked far slower (~30-55s/title), but that turned out to be an artifact of averaging in an unrepresentative slow stretch near the run's start, not a real sustained rate.
+**Why complete-linkage**: validated against a 400-pair hand-labeled ground truth (`backend/clustering_validation.ipynb`, train/val/test split), compared against HDBSCAN.
 
-> **Update (2026-08-26): the LLM gate has been swapped out for an embedding classifier in production.** At ~500 articles/day, the LLM gate alone cost ~75 min/day of CPU time and blocked every other pipeline stage while it ran. An embedding-based nearest-centroid classifier (on the same `Qwen3-Embedding-0.6B` model already used for content embeddings) was trained on 1,423 of the LLM gate's own past decisions: **99.0% recall** (only 2/196 truly-relevant articles wrongly archived) at **71.1% precision** (49% of what the LLM would archive leaks through instead) on a held-out test set.
+> **Measured, real numbers** (1,511 articles):
+> - **Grid search on TRAIN**: best complete-linkage (t=1.1) scored F1=0.643; best HDBSCAN scored F1=0.716.
+> - **Algorithm selection on VAL**: complete-linkage F1=0.711 vs. HDBSCAN F1=0.651 — **complete-linkage selected**.
+> - **Final TEST score**: complete-linkage F1=0.625 vs. HDBSCAN F1=0.698 — HDBSCAN would have scored higher had it been chosen instead.
 >
-> That result was then checked against a much larger, still-uncontaminated pool — every one of the **2,103 articles gated since the original export**, none of them used to build the model. Agreement with the LLM gate: **71.4%** (1,501/2,103). Of the disagreements, **588 articles the LLM had archived were judged relevant by the model** (and were un-archived, re-entering the pipeline) against only **14** the other way — consistent with the recall-optimized design. **Live production confirmation**: the first real run under the new gate processed 413 articles at **1.35s/article average, 0 errors** — down from the LLM gate's ~9s/title.
->
-> **`services/title_gate.py` now runs the classifier alone — the LLM is no longer called in the live job.** `services/llm_insight.gate_title()` is untouched and still fully callable; it's kept specifically so periodic comparison batches (via `compare_model_vs_llm_gate.py` / `export_title_gate_dataset.py`) can keep validating the classifier against fresh LLM judgments before this is considered a final decision rather than a live experiment. Every gated article stores both `title_gate_model_decision` and (when available) `title_gate_llm_decision`, plus its own `title_embedding`, so the comparison never needs recomputing anything. Full writeup: `docs/log.md`.
+> The TEST-set ranking reversed the VAL-set ranking, which — given the small sample size — means the two algorithms are statistically close to indistinguishable on this ground truth, not that complete-linkage is a proven better fit. It was kept anyway, following standard train/val/test discipline (selected on validation, not cherry-picked from the test score), as a low-confidence pick rather than a settled one.
 
-Only one extraction can run at a time (an in-memory lock) — clicking the button again while one is running just reports "already in progress" instead of starting a second one. If the backend restarts mid-run (crash or redeploy), any article left stuck at `Pending` is automatically reset to `No Extraction` on the next startup, so nothing is permanently stranded.
+### Phase 2 — Extract
 
-**Recovering `Failed` articles** — each `Failed` article in the article list gets two options:
-- **🔁 Retry automatic extraction** — re-attempts just that one article synchronously (useful if the first failure was transient, e.g. a slow page load).
-- **Paste content manually** — an expandable text box to paste the article's text by hand; saved exactly as a successful automatic extraction would be.
+Every article in a freshly-formed cluster still in `No Extraction` gets its full text pulled: a headless Chromium browser (Playwright) loads the page, `trafilatura` pulls the main body text, skipping ads/navigation/cookie banners. This is the same logic the old standalone "Extract articles" stage used (`extractor._extract_one`) — only the orchestration changed (it now only ever runs on clustered articles, from this job). A single-article **"Retry extraction"** endpoint remains available independently for any article that ends up `Failed` (paywall, cookie wall, unsupported layout), plus a manual paste-content option.
 
-**Measured performance** (benchmarked against 100 random already-processed articles, re-extracted fresh): 336.3s total (5.6 min), averaging **3.4s/article**. 98% succeeded; failures resolve fast too (1.3s avg). Of the articles sampled that were previously `Failed`, most (7 of 9) succeeded on this re-attempt — evidence that most `Failed` articles are transient (a slow load, a timeout) rather than permanently unextractable, even though the app doesn't auto-retry them.
+### Phase 3 — Condense
 
----
+Once every member of a cluster has reached a terminal extraction status (`Successful`/`Failed`), `services/cluster_condenser.py` turns its members into an extractive (not LLM-written) representation, using the same already-loaded embedding model:
 
-## Semantic embeddings & Pinecone
+1. **Deduplicate member titles** by embedding similarity (titles already have a stored embedding from title-gating — no re-embedding needed).
+2. **Split** every successfully-extracted member's content into sentence-level chunks.
+3. **Deduplicate those chunks** by embedding similarity — same-story articles routinely repeat whole sentences of wire copy verbatim or near-verbatim.
+4. **Select a diverse, relevant subset via MMR** (Maximal Marginal Relevance) — greedily pick chunks close to the cluster's content centroid while staying far from what's already picked, stopping once nothing left is meaningfully different (not at a fixed count).
 
-Every successfully-extracted article can be turned into searchable vector embeddings — the groundwork for the relativity scoring below, and for future semantic search / "find related articles" / retrieval-augmented Q&A over the whole archive. Built with plain `sentence-transformers`, `pymongo`, and the `pinecone` client directly — no LangChain or other orchestration framework.
+Every deduped chunk's embedding — not just the MMR-selected subset — is persisted to Pinecone, since contextualization later needs to search over all of it; the cluster's stored `chunks` (what entity extraction and the dashboard actually show) hold only the selected text.
 
-Each article has an `embedding_status`, independent of `ingestion_status`:
+> This replaced an earlier LLM-based abstractive summary (one Ollama call per cluster, `llm_insight.summarize_cluster`, still in the codebase but unused) that measured ~100–200s/cluster on CPU-only hardware — projected at 9+ hours for a single backlog run. The embedding-only approach runs in a small fraction of a second per cluster.
 
-| Status | Meaning |
-|---|---|
-| `Not Embedded` | Default state — either never attempted, or not eligible yet (only `Successful`-extraction articles are ever candidates). |
-| `Pending` | Currently being chunked/embedded/upserted. |
-| `Embedded` | Its chunks are stored in Pinecone; `chunk_ids` and `number_of_chunks` are recorded on the article. |
-| `Failed` | An attempt was made but something went wrong (chunking, embedding, or the Pinecone upsert); retried automatically on the next run. |
+### Phase 4 — Extract entities
 
-**"🧠 Embed articles"** starts a background job:
-1. **Gathers** every article with `ingestion_status == "Successful"` and `embedding_status != "Embedded"` — a `Failed`/`Pending`/`Expired`-extraction article is never touched, enforced both by the query and by a hard guard at the database-write level.
-2. **Chunks** each article's content on line breaks (`services/chunking.py`), embeds every chunk with **Qwen3-Embedding-0.6B**, and upserts the resulting vectors into the Pinecone index `yazaki` in batches, tagged with `article_id`, `url`, `order`, `language`, and the chunk's own text as metadata.
-3. **Tracks live progress** in a `meta` document — total candidates, processed count, and a recency-weighted (exponential moving average) estimate of seconds-per-article, so one anomalously slow article (e.g. a cold-start warmup right after a container restart) doesn't permanently skew the ETA.
-4. **Logs** one `embedding_runs` document per run (status, counts, errors) — a permanent history, separate from the `meta` document that only reflects the current/most recent run.
+A multilingual NER model (`Davlan/bert-base-multilingual-cased-ner-hrl`, via `services/entity_extraction.py`) runs over each condensed cluster's `chunks` — actual article content, not headline phrasing — tagging PER/ORG/LOC/MISC mentions. Each raw mention is then **canonicalized** into a persistent entity database (`models.Entity`, the `entities` collection) by embedding similarity within its type: "Renault" and "Groupe Renault" (both ORG) collapse into one canonical entity, tracked across every cluster it's ever appeared in via a SlimRAG-style entity-to-cluster inverted index (`Entity.cluster_ids`). A person and an organization sharing a name never merge, since matching only ever compares mentions of the same type.
 
-While a run is active, the overview bar shows a progress bar and an ETA, and the button becomes **"🛑 Stop embedding"** — this asks the run to stop after its current article finishes (there's no safe way to interrupt Python mid-computation), then resets the guard flag and any `Pending` article back to a clean state. The same guard-reset also runs automatically on backend startup, in case the process was killed outright rather than shut down cleanly.
+Canonicalization is embedding-based, not LLM-based — an LLM alias-resolution call per mention would reintroduce the exact slowness the condensation rewrite just eliminated.
 
-**Expiry cleanup** — when `expire_old_content()` marks an article `Expired`, it also deletes that article's vectors from Pinecone (via its stored `chunk_ids`) in the same step, so Mongo and Pinecone never drift out of sync with each other.
+### Phase 5 — Contextualize
 
----
+Links a condensed, entity-extracted cluster to the earlier clusters most likely to be a related past event — metadata a future insights stage can use to reason about a story's history rather than judging it in isolation.
 
-## Relativity scoring
+1. **Find candidates cheaply**: union the `cluster_ids` of every one of this cluster's real (non-fragment) entities, rather than scanning the whole `clusters` collection.
+2. **Filter to the past**: only clusters dated strictly before this one qualify.
+3. **Score each candidate**: `(Pinecone chunk-embedding centroid similarity) × (shared real-entity count)` — SlimRAG-inspired, comparing the cluster's own content centroid against each candidate's.
+4. **Keep the top 10**, highest score first.
 
-Not every article that matches a keyword is actually relevant — a wire-service story that happens to mention a tracked name once is not the same as a piece substantively about it (in the reference config: a story that merely mentions "Renault" vs. one about Renault's EV platform strategy). Relativity scoring is a **0–100 score, computed per article**, that captures the difference — the score every article is ranked by in the dashboard.
+A cluster whose real entities never appear in any earlier cluster gets an empty `similar_clusters` list — a legitimate "genuinely new story" outcome, not a failure. "Real" entities exclude NER tokenization fragments (single/double-letter tokens, `##`-prefixed wordpiece continuations) — naive matching would otherwise treat a stray fragment like "K" or "AM" as meaningful and spuriously link unrelated clusters.
 
-### The relevance tree
+> This is the second attempt at this kind of scoring. An earlier design ("relevance condensing") tried applying the same similarity × entity-overlap formula *inside* a single cluster's own chunks, to pick out the most useful ones — but there was no real "query" to compare a chunk against, so the formula had nothing to measure and was reverted. Contextualization succeeds because there's a real query: the cluster itself, compared against real past clusters.
 
-`backend/app/yazaki_tree_id_map.json` is a hand-built taxonomy — roughly 155 nodes rooted under things like *Automotive Industry*, branching down through *OEM & Vehicle Manufacturing*, *Electric & Hybrid Vehicle Transition*, *Automotive Wiring Competitors* (Yazaki's actual competitors), ports, and logistics. Every node has:
-- A label in each of the three languages (`en`/`fr`/`ar`)
-- A **per-language embedding** of that label (computed once by `embed_tree_labels.py`)
-- A **similarity threshold** (default `0.4`) — how close a chunk's embedding must be, in cosine similarity, to count as a match
+### Phase 6 — Generate insights
 
-### How an article gets scored
+The final phase answers: *"does this cluster describe a concrete event that affects a specific operational parameter, and if so, what should we do about it?"* — for every cluster that reached `contextualized == True` and hasn't been through this phase yet. It runs a **local** LLM (Qwen2.5-7B-Instruct via [Ollama](https://ollama.com), quantized `q4_K_M`, ~5.5 GB to run, CPU-only) in its own container — no data leaves the machine, no external LLM API, which matters if the source articles or the business rules you feed it are sensitive.
 
-For each of an article's chunks (fetched back from Pinecone, embedding + language included), the scorer walks the tree from every root:
-1. At each node, compute cosine similarity between the chunk's embedding and **that node's same-language embedding** (an Arabic chunk is only ever compared against Arabic tree labels, never English/French — see `scorer.py`'s `_walk`).
-2. Below the node's threshold → stop descending this branch for this chunk.
-3. At/above threshold → if the node has children, keep descending; if it's a structural leaf (or none of its children cleared their own threshold), record a **hit**.
-4. Hits from every chunk are grouped by node, then combined into a final score: the single best-matching node's `similarity ** 1.8` (an exponent that compresses mid-range similarities much more than high ones, so only genuinely strong matches approach 100), plus small bonuses for how many *different* nodes were triggered (breadth) and how much of the article's content reached a true leaf node (volume/density).
-5. The result — `relativity_score` (0–100) and a full `score_explanation` (which nodes triggered, at what similarity, leaf or branch, which chunks supported each one) — is saved on the article.
+`services/llm_insight.assess_cluster()`:
 
-Each article has a `scored_status`, mirroring the other jobs:
-
-| Status | Meaning |
-|---|---|
-| `Not Scored` | Default — not attempted yet, or not eligible (only `Embedded` articles are candidates). |
-| `Pending` | Currently being scored. |
-| `Scored` | Has a `relativity_score` and `score_explanation`. |
-| `Failed` | Something went wrong (e.g. a chunk's vector wasn't found in Pinecone); retried automatically next run. |
-
-**"🎯 Relativity scoring"** starts a background job with the same progress/ETA/stop mechanics as embedding. Its guard, progress tracking, and startup crash-recovery all mirror the embedding job exactly (see `scoring_job.py`, a near-identical structure to `embedder.py`).
-
-### Feedback: teaching the tree
-
-Every scored article gets two feedback buttons plus a rescore button:
-
-- **👍 More** / **👎 Less** — tells the system this article is more, or less, relevant than its score suggests. Each click does two things at once:
-  1. **Nudges the threshold** of every tree node this article's scoring run triggered, scaled by how much of the article actually supported that node (a node backed by 8 of 10 chunks moves close to the full step; one backed by a single stray chunk barely moves at all). These nudges are stored as overrides in a `node_threshold_overrides` Mongo collection — not written into the tree file itself — so they apply to every future scoring run without ever touching the ~155-node source file. *(This mostly shapes how future/other articles score; a small threshold shift rarely flips a similarity that was already well clear of the line.)*
-  2. **Directly adjusts this article's own score** by ±5 points (`relativity_score_adjustment`, clamped so the final score stays in 0–100) — the part that guarantees the number you're looking at actually moves. This adjustment is remembered and re-applied every time the article is rescored, including in a full bulk run, so it's never silently lost.
-- **🔄 Rescore** — re-runs scoring for just this one article against the tree as it currently stands (including any threshold overrides *other* articles' feedback has accumulated, and this article's own existing adjustment) — no feedback given, nothing changed. Useful after the tree has moved since this article was last scored.
-
-### Article detail page
-
-Click **"See more"** on any article to open a dedicated page (no visible page-switcher UI — it's reached only via that button) showing:
-- The full scraped content
-- The relativity score, same color coding as the list
-- Every triggered relevance node, as a root-to-leaf breadcrumb (e.g. *Automotive Industry › Electric & Hybrid Vehicle Transition › Hybrid Vehicle Platforms*), with a similarity bar, a Leaf/Branch tag, how many chunks supported it, and the single best (primary) match flagged 🎯
-
----
-
-## Daily insight reports (local LLM)
-
-Relativity scoring answers *"is this article on-topic?"*. The report stage answers a sharper question: *"does this describe a concrete event that affects a specific operational parameter, and if so, what should we do about it?"* — and writes the answer as a short, structured daily brief. It runs a **local** LLM (Qwen2.5-7B-Instruct via [Ollama](https://ollama.com), quantized `q4_K_M`, ~5.5 GB to run, CPU-only) in its own container — no data leaves the machine, no external LLM API, which matters if the source articles or the business rules you feed it are sensitive.
-
-### The Reports calendar
-
-A dedicated **"📄 Daily Insight Reports"** page (linked from the dashboard) shows a month calendar. Each day is marked:
-
-| Marker | Meaning |
-|---|---|
-| `· N` | Not generated yet — the day has **N** candidate articles (scored ≥ 60, not expired) awaiting a report |
-| 🔴 `N` | Generated — the report found **N** relevant insights |
-| ✅ | Generated — ran successfully but found nothing operationally relevant that day |
-| *(plain number)* | No candidate articles and no report |
-
-Clicking a day shows its insight cards, a *"no relevant insights for this day"* message (if it was generated empty), or a **Generate report** button (if it hasn't been run). A day can be regenerated at any time.
-
-### How a report is generated
-
-**Generation is a background job** — a busy day (dozens of articles, each a separate LLM pass on CPU) can take many minutes, so clicking **Generate** kicks off the run and the page shows a live progress bar + ETA + stop button, exactly like the embedding/scoring jobs. It also shares the same **single-stage-at-a-time guard**: report generation never runs concurrently with extraction/embedding/scoring (they'd fight for CPU), and its guard flag resets on backend startup after a crash.
-
-For the chosen day, the job:
-
-1. **Gathers candidates** — every article published that (UTC) day with `relativity_score ≥ 60` that isn't `Expired` (an expired article's content has been purged, so it can't be assessed and is excluded — it counts as 0 on the calendar).
-2. **Translates non-English articles to English first**, and **caches the translation** on the article (`translated_title` / `translated_content`, `translation_status`). This matters: testing showed the model reliably judges relevance in English but silently misses the *same clearly-relevant event* when it's in Arabic. Caching means each non-English article is translated only once, ever — every later report run reuses the stored English instead of paying the translation call again.
-3. **Assesses each article one at a time** against the business-logic rules (batching multiple articles into one prompt was found to make the model lazily skip reasoning). Output is constrained to a strict JSON schema, so every relevant result is a clean object:
+1. **Feeds the cluster's condensed `chunks`** to the model, each numbered (`[0] ...`, `[1] ...`) so the model can cite exactly which ones support a finding, up to a character budget (dropping the least-recently-selected chunks first if a cluster has more than fits).
+2. **Feeds `similar_clusters` as context** (the earlier related clusters from phase 5, if any) — a related past event the model can use to judge whether this is a continuation of an ongoing situation or something new. These carry no chunk indices of their own and are never citable.
+3. **Applies the business-logic rules** (the same two Markdown files the reporting stage always used) and returns a strict JSON array of insights, each shaped like:
    ```json
    {
      "title": "Houthi group announces maritime blockade against Saudi Arabia",
      "confidence": 90,
      "concerned_param": "EORD-FLIFN",
      "effect": "negative",
-     "recommended_action": "Block this route in the source list and reroute sourcing — this is a closure, not a delay."
+     "recommended_action": "Block this route in the source list and reroute sourcing — this is a closure, not a delay.",
+     "chunk_indices": [4, 7]
    }
    ```
-   Off-topic articles (a car-model launch, a competitor's award) return nothing and simply don't appear in the report.
-4. **Stores one report document** per day in the `daily_reports` collection (keyed by date). An empty report is a real, distinct result ("processed, nothing relevant") — not the same as a day that was never generated.
+   A story with nothing operationally relevant returns an empty array. Any `chunk_indices` value outside the real range of `chunks` is dropped rather than kept — a wrong citation is worse than a missing one.
+4. **Stores the result directly on the cluster** (`Cluster.insights`, `Cluster.insights_generated`) — there's no separate reports collection; a cluster's insights live with the cluster that produced them.
+
+This phase is skipped for the run (not counted as an error) if Ollama isn't reachable when it starts, and picks the backlog back up on the next preprocessing run.
+
+> **Replaces the earlier per-article, on-demand daily-report flow** (`report_job.py`/a `daily_reports` collection, retired 2026-09-15): that stage gathered every article in a contextualized cluster and called the LLM once per article, once per day, on a "Generate" button click — never using a cluster's `similar_clusters` context, and re-litigating the same story once per outlet that covered it. This phase calls the LLM once per **cluster**, automatically, as a normal backlog phase — one call per story instead of one per article about that story, and it can finally use the "related past coverage" metadata contextualization produces. It deliberately does **not** translate non-English chunks first, unlike the old per-article flow (which cached a translation per article) — a cluster's chunks can mix languages across member articles, so there's no single source language to translate from, and translating each chunk individually would reintroduce the kind of per-item LLM round trip this whole condensation-based design was built to avoid. The prompt instead tells the model chunks may be in English, French, or Arabic; this hasn't been validated against real mixed-language clusters as thoroughly as the old translate-first approach was (see [Known limitations](#known-limitations)).
+
+---
+
+## Daily insight reports (viewing)
+
+The Dashboard's **Daily Insight Reports** section (bottom of the page) is a **read-only** calendar/day view over what phase 6 has already produced in the `clusters` collection — merged into the main Dashboard once the old per-article relativity scorer (see [Known limitations](#known-limitations)) was retired and there was no more dedicated page slot to keep it apart from. There's no "Generate" button here: running Preprocessing is what makes a day's insights appear.
+
+A month calendar marks each day:
+
+| Marker | Meaning |
+|---|---|
+| `· N` | **N** clusters that day are contextualized but haven't reached phase 6 yet — still queued |
+| 🔴 `N` | Every cluster that day has been through phase 6, and **N** relevant insights were found |
+| ✅ | Every cluster that day has been through phase 6, and none were relevant |
+| *(plain number)* | No clusters exist for that day yet |
+
+Clicking a day lists its insights, each showing which cluster (story) it came from, the affected operational parameter, effect, confidence, recommended action, and how many chunks support it. A day with clusters still pending phase 6 shows a banner saying so — its insight list may be incomplete until the next preprocessing run catches up.
 
 ### The business logic (human-authored)
 
-Two Markdown files, fed to the model alongside each article, are the editable "brain" of this stage — no code change needed to tune its judgment:
+Two Markdown files, fed to the model alongside each cluster's chunks, are the editable "brain" of this stage — no code change needed to tune its judgment:
 
-- **`backend/app/llm_insight_business_logic.md`** — how to decide relevance, how to classify a disruption (Port Congestion / Total Blockade / Capacity Change), how to reason about SAP impact (including the MRP backward-scheduling logic), how to set `confidence`, and worked examples. It also carries a **company-context primer** (who Yazaki/Y-EMEA is: ~45,000 employees, ~18 EMEA plants — Morocco, Tunisia, Egypt, Turkey, Bulgaria, Portugal, Romania, Serbia, Ukraine — their ports, confirmed OEM customers, and key inbound suppliers/logistics providers) so the model recognizes when a named place or company actually touches Yazaki's supply chain, rather than relying on the article alone. `concerned_param` stays a single field even for dual-impact events (e.g. a blockade *threat* that's between a delay and a closure); the `recommended_action` sentence carries the nuance a single field can't. Four MRP parameters are called out as the ones that dominate in practice — `MARC-PLIFZ` (planned delivery time, transit delays), `MARC-WEBAZ` (goods-receipt processing time — the ship arrives on time but the material is stuck at customs/the gate), `MARC-SHZET` (safety time — delivery *reliability*, not just lead time, moving), and `MARC-MRPPP` (planning cycle — the ordering/sailing rhythm itself changing).
+- **`backend/app/llm_insight_business_logic.md`** — how to decide relevance, how to classify a disruption (Port Congestion / Total Blockade / Capacity Change), how to reason about SAP impact (including the MRP backward-scheduling logic), how to set `confidence`, and worked examples. It also carries a **company-context primer** (who Yazaki/Y-EMEA is: ~45,000 employees, ~18 EMEA plants — Morocco, Tunisia, Egypt, Turkey, Bulgaria, Portugal, Romania, Serbia, Ukraine — their ports, confirmed OEM customers, and key inbound suppliers/logistics providers) so the model recognizes when a named place or company actually touches Yazaki's supply chain, rather than relying on the content alone. `concerned_param` stays a single field even for dual-impact events (e.g. a blockade *threat* that's between a delay and a closure); the `recommended_action` sentence carries the nuance a single field can't. Four MRP parameters are called out as the ones that dominate in practice — `MARC-PLIFZ` (planned delivery time, transit delays), `MARC-WEBAZ` (goods-receipt processing time — the ship arrives on time but the material is stuck at customs/the gate), `MARC-SHZET` (safety time — delivery *reliability*, not just lead time, moving), and `MARC-MRPPP` (planning cycle — the ordering/sailing rhythm itself changing).
 - **`backend/app/llm_insight_sap_attributes.md`** — the strict, authoritative list of SAP parameters the model is allowed to cite (currently `MARC-PLIFZ`, `MARC-EISBE`, `EKPO-ETFZ`, `EORD-FLIFN`, plus outbound `VBEP`/`LIKP`/`VBAK`). Anything not on this list is off-limits — an event with no matching parameter comes back "not relevant" rather than being force-fit onto the wrong field.
 
-  > ⚠️ **Known gap:** the business-logic doc above now describes `MARC-WEBAZ`, `MARC-SHZET`, and `MARC-MRPPP` as the most influential parameters, but they aren't in this attribute list yet — since the model is strictly limited to what's listed here, it currently **cannot** select any of the three, no matter how well an article matches them. Add them to `llm_insight_sap_attributes.md` before relying on that guidance.
+  > ⚠️ **Known gap:** the business-logic doc above now describes `MARC-WEBAZ`, `MARC-SHZET`, and `MARC-MRPPP` as the most influential parameters, but they aren't in this attribute list yet — since the model is strictly limited to what's listed here, it currently **cannot** select any of the three, no matter how well a story matches them. Add them to `llm_insight_sap_attributes.md` before relying on that guidance.
 
-Edit these two files to change what the reports flag and how — extend the SAP list, add few-shot examples, refine the classification rules.
+Edit these two files to change what insight generation flags and how — extend the SAP list, add few-shot examples, refine the classification rules.
+
+---
+
+## Automated daily runs
+
+The `scheduler` Compose service (`scheduler/run_pipeline.py`) runs the full pipeline once a day at `PIPELINE_HOUR_UTC:00` UTC (default `02:00`), in order: **Update → Preprocessing**. It drives this through the exact same HTTP endpoints the dashboard's own buttons call — triggering each stage, then polling its status endpoint until it's no longer `in_progress` before moving to the next. There's no separate "Report" step to trigger anymore: preprocessing's own phase 6 already covers insight generation end to end. The backend itself, not this script, is what actually refuses to run two heavy stages at once.
+
+No cron, no external orchestrator — just a plain Python sleep-until-next-run loop, which survives a container restart cleanly (it recomputes the next run time and waits again; a stage left mid-run is picked up fresh, since every stage is itself resumable). A stage failing is logged and doesn't crash the scheduler loop — it just waits for tomorrow's run. Override the hour with the `PIPELINE_HOUR_UTC` environment variable in `docker-compose.yml`.
 
 ---
 
 ## Configuration
 
-**Keywords** — edit `backend/app/keywords.py` to add or remove search terms. Each language (`en`, `fr`, `ar`) has its own list, since company names need to be transliterated (not just translated) to actually match Arabic-language headlines — e.g. Renault appears as "رينو", not "Renault". Beyond company/port names, the list also includes a **disruption-signal group** per language (e.g. "customs strike", "shipping delay", "plant shutdown") deliberately mapped to the four SAP MRP parameters the report stage cares about most (`PLIFZ`/`WEBAZ`/`SHZET`/`MRPPP` — see [Daily insight reports](#daily-insight-reports-local-llm)), so the kind of event that actually moves those fields is more likely to be caught at ingestion, not just at LLM-assessment time.
+**Keywords** — edit `backend/app/keywords.py` to add or remove search terms. Each language (`en`, `fr`, `ar`) has its own list, since company names need to be transliterated (not just translated) to actually match Arabic-language headlines — e.g. Renault appears as "رينو", not "Renault". Beyond company/port names, the list also includes a **disruption-signal group** per language (e.g. "customs strike", "shipping delay", "plant shutdown") deliberately mapped to the four SAP MRP parameters insight generation cares about most (`PLIFZ`/`WEBAZ`/`SHZET`/`MRPPP` — see [Preprocessing pipeline](#preprocessing-pipeline)), so the kind of event that actually moves those fields is more likely to be caught at ingestion, not just at LLM-assessment time.
 
 **Scrape window** — the first-ever run defaults to the last 7 days. Adjust `DEFAULT_DAYS_BACK` in `backend/app/services/scraper.py` to change this.
 
@@ -430,40 +406,45 @@ Edit these two files to change what the reports flag and how — extend the SAP 
 
 **Excluded words** — `EXCLUDE_WORDS_BY_LANGUAGE` in `keywords.py` controls what gets filtered out (e.g. job postings). Add more terms per language as needed.
 
-**Extraction expiry window** — articles are expired one calendar month after `published_at`. Adjust `EXPIRY_MONTHS` in `backend/app/services/extractor.py` to change this.
+**Extraction expiry window** — articles are expired one calendar month after `published_at`, purging their content. Adjust `EXPIRY_MONTHS` in `backend/app/services/extractor.py` to change this.
 
-**Embedding model / index** — `EMBEDDING_MODEL_NAME` and `PINECONE_INDEX_NAME` in `backend/app/services/embedder.py` (the latter must match the constant of the same name in `repository.py` and `scorer.py`, used for the expiry-cleanup and scoring read-back paths). `UPSERT_BATCH_SIZE` / `PINECONE_DELETE_BATCH_SIZE` control Pinecone batch sizes; `RATE_EMA_ALPHA` controls how quickly the reported ETA reacts to a change in processing speed.
+**Title gate** — `title_gate_centroids.npz` in `backend/app/` holds the two reference vectors; regenerate via `extract_centroids.py` after retraining on your own data (see [The title gate](#the-title-gate)). `EMBEDDING_MODEL_NAME` in `backend/app/services/title_gate_model.py` names the shared embedding model everything else (condensation, entity canonicalization, contextualization) also reuses.
 
-**Relativity scoring** — all in `backend/app/services/scorer.py`:
-- `SCORE_POWER` (default `1.8`) — the exponent applied to a node's similarity; higher values compress mid-range scores further toward 0.
-- `LEAF_MULTIPLIER`, `BREADTH_BONUS_STEP` / `BREADTH_BONUS_MAX_EXTRA_NODES`, `VOLUME_BONUS_PER_CHUNK` / `VOLUME_BONUS_CAP`, `DENSITY_BONUS_WEIGHT` / `DENSITY_BONUS_FRACTION_THRESHOLD` — the bonus terms described above.
-- `FEEDBACK_STEP` (default `0.02`) and `FEEDBACK_THRESHOLD_MIN`/`MAX` (`0.1`–`0.9`) — the per-click tree-threshold nudge and its bounds.
-- `FEEDBACK_SCORE_STEP` (default `5`, in `routers/scoring.py`) — the direct per-click score adjustment.
-- Per-node thresholds live in `yazaki_tree_id_map.json` itself (baseline, default `0.4` for every node) — re-run `embed_tree_labels.py` if you ever change the tree's structure or labels.
+**Clustering** — `LINKAGE_THRESHOLD` / `LINKAGE_METHOD` / `LINKAGE_METRIC` / `FCLUSTER_CRITERION` / `FCLUSTER_DEPTH` in `backend/app/services/preprocessing.py`, validated against `backend/clustering_validation.ipynb` — change the threshold only with a fresh validation pass, not by feel.
 
-**LLM insight reports:**
+**Condensation** — all in `backend/app/services/cluster_condenser.py`: `TITLE_DEDUP_THRESHOLD` / `CHUNK_DEDUP_THRESHOLD` (near-duplicate cutoffs), `MMR_NOVELTY_THRESHOLD` (how different a chunk must be to keep getting selected), `MMR_LAMBDA` (relevance vs. diversity weighting), `CONDENSE_MAX_CHUNKS` (a safety cap, not the primary stopping rule), `MIN_CHUNK_CHARS` (drops short sentence-split artifacts).
+
+**Entity extraction** — `NER_MODEL_NAME` and `CANONICALIZATION_THRESHOLD` (default `0.85`, not yet empirically validated against a labeled set — a starting point) in `backend/app/services/entity_extraction.py`.
+
+**Contextualization** — `MIN_ENTITY_NAME_CHARS` and `TOP_K_SIMILAR_CLUSTERS` in `backend/app/services/contextualization.py`; `PINECONE_INDEX_NAME` there must match the constant of the same name in `repository.py`.
+
+**LLM insight generation (phase 6):**
 - **Model** — `OLLAMA_MODEL` (default `qwen2.5:7b-instruct-q4_K_M`) in `backend/app/config.py`; must match the model the `ollama` service pulls in `docker-compose.yml`. `OLLAMA_HOST` points the backend at the Ollama container. The model choice is a deliberate fit for the target hardware (no GPU, ~16 GB RAM shared across the whole stack) — larger models risk swap-thrashing.
-- **Candidate threshold** — `MIN_RELATIVITY_SCORE` (default `60`) in `backend/app/services/report_job.py` decides which of a day's scored articles get assessed.
-- **Judgment / rules** — the two `llm_insight_*.md` files (see [Daily insight reports](#daily-insight-reports-local-llm)); no code change needed to retune.
-- **Decoding** — `num_ctx` (`8192`) and `temperature` (`0.2`) in `backend/app/services/llm_insight.py`. The context override is required: Ollama's 4096 default silently truncates a real article + the business-logic prompt, and the low temperature keeps the structured field choices stable.
+- **Candidate eligibility** — every cluster with `contextualized == True` (`repository.get_clusters_ready_for_insights`) — no score threshold to tune.
+- **Judgment / rules** — the two `llm_insight_*.md` files (see [Preprocessing pipeline](#preprocessing-pipeline)); no code change needed to retune.
+- **Prompt sizing** — `MAX_CLUSTER_CONTENT_CHARS` in `backend/app/services/llm_insight.py` caps how many of a cluster's chunks fit in the prompt (keeping the earliest-selected, most-central ones if it doesn't all fit).
+- **Decoding** — `num_ctx` (`8192`) and `temperature` (`0.2`) in `backend/app/services/llm_insight.py`. The context override is required: Ollama's 4096 default silently truncates a real cluster + the business-logic prompt, and the low temperature keeps the structured field choices stable.
+- **Timeout** — `assess_cluster()`'s per-call HTTP timeout is dynamic, not fixed: `SECONDS_PER_CHUNK` (`20`) × however many chunks actually made it into the prompt (`_build_chunk_block`'s count, after `MAX_CLUSTER_CONTENT_CHARS` truncation), plus a flat `TIMEOUT_BUFFER_SECONDS` (`100`) margin. The per-chunk rate came from a single real measurement (24 chunks took ~484s, ~20.2s/chunk) with no slack of its own, so the buffer exists specifically to absorb normal call-to-call variance around that average rather than misreading it as a failure. Other calls (`gate_title`, `summarize_cluster`) still use the fixed `REQUEST_TIMEOUT` (`600`s). See [Known limitations](#known-limitations) before running this over a large backlog.
+
+**Daily schedule** — `PIPELINE_HOUR_UTC` (default `2`, UTC) as an environment variable on the `scheduler` service in `docker-compose.yml`.
 
 ---
 
 ## Syncing the database between machines
 
-The database isn't a Docker named volume shared across machines — it's local to whichever machine's Docker Desktop is running it. To carry your data (scraped articles, extraction/embedding/scoring progress) from one machine to another, the project uses a **git-committed MongoDB dump**:
+The database isn't a Docker named volume shared across machines — it's local to whichever machine's Docker Desktop is running it. To carry your data (scraped articles, title-gate/clustering/preprocessing progress) from one machine to another, the project uses a **git-committed MongoDB dump**:
 
-- `backend/yazaki_news/` is a `mongodump` snapshot of every collection (`articles`, `meta`, `scrape_runs`, `extraction_runs`, `embedding_runs`, `scoring_runs`, `node_threshold_overrides`, `daily_reports`), checked into the repo.
+- `backend/yazaki_news/` is a `mongodump` snapshot of every collection (`articles`, `meta`, `scrape_runs`, `title_gate_runs`, `clustering_runs`, `clusters`, `entities`), checked into the repo. Clusters carry their own generated insights (`Cluster.insights`) — there's no separate reports collection.
 - The `mongo-restore` service in `docker-compose.yml` restores this snapshot into the `mongo` container's database — but it is **opt-in**, behind Compose's `sync` profile. A plain `docker compose up` (with or without `--build`) never touches it.
 
-> This used to run automatically on every `docker compose up`, silently dropping and overwriting the live database on any unrelated rebuild/restart — that turned out to be actively dangerous (it once wiped out an in-progress scoring run). It's opt-in now specifically to prevent that.
+> This used to run automatically on every `docker compose up`, silently dropping and overwriting the live database on any unrelated rebuild/restart — that turned out to be actively dangerous (it once wiped out an in-progress run). It's opt-in now specifically to prevent that.
 
 ### Running the app normally
 
 ```bash
 docker compose up --build -d
 ```
-Starts Mongo (with whatever's already in its volume — unchanged unless you explicitly sync), backend, and the React frontend. Safe to run as often as you like; never touches the database.
+Starts Mongo (with whatever's already in its volume — unchanged unless you explicitly sync), backend, the React frontend, and the scheduler. Safe to run as often as you like; never touches the database.
 
 ### Pulling the latest committed snapshot (explicit, when you actually want it)
 
@@ -523,42 +504,23 @@ docker compose down -v
 
 ---
 
-## RAG pipeline redesign — clustering method study
-
-Part of an in-progress redesign (see `docs/rag_redesign/`) to group same-day articles about the same story before extraction, rather than processing every article independently. Two candidate clustering algorithms were compared: **complete-linkage agglomerative clustering** (cut via an automatic inconsistency-coefficient threshold, not a hand-picked distance) and **HDBSCAN**.
-
-**Data source**: the ground-truth labels used to validate both algorithms were generated by an LLM (the assistant, working with the maintainer in the design conversation) — 400 article-pairs, each manually read and labeled "same specific story/event" vs. "different story," stratified across embedding-similarity bands so the set includes hard/ambiguous cases, not just obvious ones. This is **not** an independently verified or multi-rater-agreed ground truth — treat it as a directional signal, not a rigorous benchmark. The full labeled data and a runnable comparison notebook are in `backend/`: `clustering_train.csv` (200 pairs, used to grid-search each algorithm's parameters), `clustering_val.csv` (100 pairs, used to pick the winning algorithm), `clustering_test.csv` (100 pairs, looked at only once for a final honest score), and `clustering_validation.ipynb`.
-
-> **Measured, real numbers** (1,511 articles judged relevant by either the LLM or centroid title-gate model, Qwen embeddings):
-> - **Grid search on TRAIN**: best complete-linkage (t=1.1) scored F1=0.643; best HDBSCAN (min_cluster_size=2, min_samples=1, eom) scored F1=0.716.
-> - **Algorithm selection on VAL** (untouched by tuning): complete-linkage F1=0.711 vs. HDBSCAN F1=0.651 — **complete-linkage selected**.
-> - **Final, only-looked-at-once TEST score**: complete-linkage F1=0.625 (precision=0.536, recall=0.750) vs. HDBSCAN F1=0.698 (precision=0.652, recall=0.750) — HDBSCAN would have scored higher had it been chosen instead.
-
-**Honest conclusion**: the TEST-set ranking reversed the VAL-set ranking, which — given the small sample size (~20 positive examples per split) — means the two algorithms are **statistically close to indistinguishable** on this ground truth, not that complete-linkage is a proven better fit. **Complete-linkage was chosen anyway**, following standard train/val/test discipline (the model selected on validation performance, not cherry-picked from the test score), with the explicit understanding that this is a low-confidence pick given the tie, not a confidently-validated one. Revisiting this with a larger labeled set is the natural next step if the choice needs firmer footing.
-
----
-
 ## Known limitations
 
 - **Every news source's free tier is limited in its own way** — see the [News sources](#news-sources) table for specifics (GNews: 100 requests/day; NewsAPI.org: 100/day and free-tier terms restrict it to dev/testing use; NewsData.io: 200 credits/day, no server-side date filtering, 100-char query cap; Currents: 7-day max date range per request; TheNewsAPI.com: 100 requests/day *and* only 3 articles/request). A busy day with many keyword chunks across three languages can approach these limits, especially TheNewsAPI.com's.
-- **Content previews, not full articles, from any of the five sources** — none of the free tiers return the complete article body (GNews/NewsAPI.org give a truncated preview a few hundred characters long; NewsData.io and Currents give none at all). Full text still only comes from the extraction stage's real page fetch (see [Article content extraction](#article-content-extraction)) — the sources are for discovery, not content.
+- **Content previews, not full articles, from any of the five sources** — none of the free tiers return the complete article body. Full text still only comes from the extraction phase's real page fetch — the sources are for discovery, not content.
 - **Single shared "last updated" watermark** across all languages *and* all five sources — if one source or language fails during a run, the whole run is marked partial and retried together next time, rather than tracking each independently.
-- **Bucket boundaries use Morocco local time** (`Africa/Casablanca`), correctly accounting for its seasonal Ramadan time change — but this means an article published late at night UTC may appear to belong to "the next day" in the dashboard.
+- **Bucket boundaries use Morocco local time** (`Africa/Casablanca`) for the overview stats, correctly accounting for its seasonal Ramadan time change — but preprocessing (and the clusters it produces) is scoped by **UTC** calendar day throughout, so an article published near midnight can land on a different "day" between the overview charts and the cluster/insight views.
 - **Extracted `.txt` files aren't in a Docker volume** — they're written to `backend/extracted_articles/` inside the backend container's writable layer, so they're lost on `docker compose down` (the database copy of the content survives, since Mongo's volume is separate). Add a volume mount if you need them to persist.
-- **The extraction lock is in-memory and per-process** — it correctly prevents two overlapping runs within a single backend container, but wouldn't coordinate across multiple backend replicas if this were ever scaled horizontally. The embedding and scoring jobs' guards, by contrast, are Mongo-backed and do survive a restart (and are automatically reset on backend startup if a process was killed mid-run).
 - **Backend Docker image is heavier** — installing Chromium (`playwright install --with-deps chromium`) adds real build time and image size versus the rest of the stack.
-- **Embedding and scoring are CPU-only** — no GPU acceleration. The very first article after a fresh container start is often markedly slower (one-time model/thread warmup) — the ETA display is recency-weighted specifically to not be thrown off by this.
-  > **Measured, real numbers** (20 real articles each, on the reference deployment's hardware — not a synthetic benchmark):
-  > - **Embedding** (chunk + encode + Pinecone upsert): **~24.4s/article** average, **~1.11s/chunk** — chunk count per article varied from 2 to 186, so per-article time is dominated by content length more than anything else. 19/20 succeeded; 1 article hit the per-article timeout (300s, see `EMBEDDING_TIMEOUT_SECONDS` in `embedder.py`) and was killed and retried on the next run, as designed.
-  > - **Relativity scoring** (tree walk against already-embedded chunks): **~2.2s/article** average, 20/20 succeeded, scaling with chunk count (~1.1–1.5s for a handful of chunks, ~2.3–3.6s for 90–145 chunks).
-  >
-  > Take these as one real sample, not a guarantee — they'll vary with your hardware, article length, and current system load.
-- **The scoring calibration is heuristic, not learned** — `SCORE_POWER` and the bonus weights in `scorer.py` were hand-tuned against a sample of real articles to hit a target score *distribution*, not trained against labeled ground truth. The feedback buttons let you correct individual articles and nudge the tree over time, but there's no formal retraining loop.
-- **Relativity feedback is global, not per-user** — a threshold override from one person's "more"/"less" click affects every future article for everyone, since there's no per-user or per-session scoping. On a shared deployment, conflicting feedback from different people will fight each other.
-- **No search/query endpoint yet** — the embedding pipeline populates Pinecone and the scorer reads from it, but there's currently no API or UI feature to directly query the vector index (semantic search, related-article lookup, RAG-style Q&A) outside of the relevance-tree walk.
-- **Daily reports don't deduplicate yet** — the same event covered by several outlets produces several near-identical cards (a real day once yielded 8 separate cards for a single Red Sea blockade story). Merging duplicate stories into one insight is the obvious next step, not yet built.
-- **Report generation is slow and CPU-bound** — a 7B model on CPU runs at roughly one article per ~30–60 seconds (translation, when needed, adds a call), so a busy day's report can take 30+ minutes. It's designed as an occasional, once-a-day background job, not something to run interactively; while it runs it holds the single-stage guard, blocking embedding/scoring/extraction.
-- **LLM judgment quality is capped by the 7B model** — it's the practical ceiling for CPU + ~16 GB RAM. If a report's calls look weak, the first lever is refining the two `llm_insight_*.md` files, not a bigger model. The `confidence` % is the model's own estimate and is **not** calibrated — treat it as a rough hint, not a probability.
-- **Report day boundaries are UTC**, while the dashboard's charts bucket by Morocco local time — an article published near midnight can land on a different "day" in the report calendar than in the dashboard chart.
-- **Corporate SSL inspection can block outbound HTTPS from inside Docker** on some networks (observed against both `gnews.io` and `huggingface.co`) — this is why the embedding model is seeded via a persistent volume rather than downloaded at build/run time. If you hit `SSLError: self-signed certificate in certificate chain`, this is almost certainly why; resolving it requires either the corporate proxy's CA certificate or an SSL-inspection bypass for the relevant domains from your IT department.
+- **Preprocessing is CPU-only** — no GPU acceleration. The very first item after a fresh container start is often markedly slower (one-time model/thread warmup) — the ETA display is recency-weighted specifically to not be thrown off by this.
+- **Entity canonicalization matches against a full scan of same-type entities**, not an ANN index — fine at the entity-database's current scale, a revisit item as it grows. Its similarity threshold (`0.85`) is a starting point, not yet validated against a hand-labeled set of merge/no-merge decisions.
+- **Contextualization's scoring formula is un-tuned against ground truth** — `(embedding similarity) × (shared entity count)` produces sensible results on the real clusters it's been checked against so far, but hasn't been validated the way the clustering-algorithm choice was (train/val/test on a hand-labeled set).
+- **The old hand-built relevance tree and its per-article tree-walk scorer were retired (2026-09-15)** — a per-article embedding stage fed a scorer that walked a ~155-node hand-built taxonomy (`yazaki_tree_id_map.json`) to produce a 0–100 "relativity score," with a feedback loop that let a human nudge the tree's thresholds. This was replaced by cluster-level condensation + entity extraction + contextualization + LLM insight generation: relevance now falls out of title-gating and the LLM's own judgment on a contextualized cluster's content, not a hand-tuned similarity tree. The tree's data was migrated into the entity database (`entity_group == "TOPIC"`, via `migrate_tree_to_entities.py`) as groundwork for a possible future entity-based relevance signal, but nothing currently reads it live.
+- **Relativity feedback and per-user scoping no longer apply** — there is no manual "more relevant / less relevant" correction mechanism now that scoring itself is gone; the day/cluster grid and cluster detail view are read-only except for extraction retries and archive/disarchive.
+- **No search/query endpoint yet** — Pinecone holds condensed-chunk embeddings and contextualization reads them back for centroid comparisons, but there's currently no API or UI feature to directly query the vector index (semantic search, related-article lookup, RAG-style Q&A) outside of that specific use.
+- **Insight generation is markedly slower than the old per-article assessment it replaced, measured live** — a real 24-chunk cluster took **~484s** (8 minutes) and a real 90-chunk cluster **exceeded the old fixed 600s timeout** outright, versus ~30–60s/article for the old `assess()` call on the same hardware. This isn't simply "more text" scaling linearly (24 chunks already cost most of a 90-chunk cluster's eventual timeout) — the schema asking for an *array* of events each with a `chunk_indices` list is a meaningfully harder decoding task for a 7B CPU model than the old single-object-or-empty schema was. The timeout is now dynamic (`SECONDS_PER_CHUNK × chunk count + TIMEOUT_BUFFER_SECONDS`, see Configuration) so a call is no longer arbitrarily killed early or left waiting past when it's realistically done — but that only prevents *false failures*, it doesn't make the underlying calls faster. **This is still a real feasibility risk for running phase 6 over the full multi-month backlog**: at these rates, thousands of backlog clusters could mean many CPU-days of Ollama time. Worth investigating before a full backlog run: a smaller/faster model for this phase specifically, a simplified schema, batching multiple clusters per call (already known to make the model lazy in the old per-article design, so not a given), or accepting a much longer timeline.
+- **LLM judgment quality is capped by the 7B model** — it's the practical ceiling for CPU + ~16 GB RAM. If insight quality looks weak, the first lever is refining the two `llm_insight_*.md` files, not a bigger model. The `confidence` % is the model's own estimate and is **not** calibrated — treat it as a rough hint, not a probability.
+- **Cluster chunks aren't translated before insight generation** (unlike the old per-article flow, which cached a translation per article) — a cluster's chunks can mix languages across member articles, so the model is simply told a chunk may be in English, French, or Arabic and left to judge it in its original language. This hasn't been validated against real mixed-language clusters as thoroughly as the old translate-first design was; if insight quality looks worse on non-English-heavy clusters, this is the first thing to check.
+- **Insights don't deduplicate across clusters yet** — clustering groups same-day, same-story articles, but a real multi-day story (or two clusters an entity-overlap threshold missed) can still produce separate insight cards on different days. Contextualization surfaces the link (`similar_clusters`) for a future stage to actually merge on; nothing merges automatically yet.
+- **Corporate SSL inspection can block outbound HTTPS from inside Docker** on some networks (observed against `gnews.io`, `huggingface.co`, and `registry.ollama.ai`) — this is why the embedding/NER models are seeded via a persistent volume rather than downloaded at build/run time, and why the `ollama` service is pointed at a corporate CA bundle (see `docker-compose.yml`). If you hit `SSLError: self-signed certificate in certificate chain` or `x509: certificate signed by unknown authority`, this is almost certainly why; resolving it requires either the corporate proxy's CA certificate or an SSL-inspection bypass for the relevant domains from your IT department.
 - **`mongo-restore` is drop-and-replace only** — see [Syncing the database between machines](#syncing-the-database-between-machines). There is no merge option, and since it's opt-in you're responsible for remembering to dump + commit before switching machines.

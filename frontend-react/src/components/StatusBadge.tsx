@@ -1,32 +1,30 @@
-// Generic pipeline-stage status badge (extraction/embedding/scoring) —
-// same icon+label-never-color-alone rule as ScoreBadge.tsx, generalized
-// across the three status enums since they share the same five states in
-// spirit: not started / pending / done / failed / expired.
+// Generic pipeline-stage status badge (extraction, title-gate, etc.) —
+// icon+label-never-color-alone, since the status enums share the same
+// states in spirit: not started / pending / done / failed / skipped.
 
 import { CheckCircle2, Circle, Clock, MinusCircle, XCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-type Tier = "done" | "failed" | "pending" | "expired" | "notStarted";
+type Tier = "done" | "failed" | "pending" | "skipped" | "notStarted";
 
 const TIER_CONFIG: Record<Tier, { color: string; bg: string; Icon: typeof CheckCircle2 }> = {
   done: { color: "text-status-good", bg: "bg-status-good/10", Icon: CheckCircle2 },
   failed: { color: "text-status-critical", bg: "bg-status-critical/10", Icon: XCircle },
   pending: { color: "text-status-warning", bg: "bg-status-warning/15", Icon: Clock },
-  expired: { color: "text-ink-muted", bg: "bg-surface-raised", Icon: MinusCircle },
+  skipped: { color: "text-ink-muted", bg: "bg-surface-raised", Icon: MinusCircle },
   notStarted: { color: "text-ink-muted", bg: "bg-surface-raised", Icon: Circle },
 };
 
-const DONE_VALUES = new Set(["Successful", "Embedded", "Scored"]);
+const DONE_VALUES = new Set(["Successful"]);
 
 function tierFor(status: string): Tier {
   if (DONE_VALUES.has(status)) return "done";
   if (status === "Failed") return "failed";
   if (status === "Pending") return "pending";
-  // Both are terminal, non-actionable states — an archived article was
-  // deliberately never sent to extraction, same practical "done, nothing
-  // more happens here" shape as an expired one, just for a different reason.
-  if (status === "Expired" || status === "Archived") return "expired";
-  return "notStarted"; // "No Extraction" | "Not Embedded" | "Not Scored"
+  // A terminal, non-actionable state — an archived article was
+  // deliberately never sent to extraction, so nothing more happens here.
+  if (status === "Archived") return "skipped";
+  return "notStarted"; // "No Extraction"
 }
 
 export function StatusBadge({

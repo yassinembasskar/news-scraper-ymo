@@ -25,7 +25,7 @@ exactly like extraction/embedding/scoring.
 Workflow, every time it's triggered:
   1. Gather -> every article with ingestion_status == "No Extraction" and
      title_gate_status != "Gated" (see repository.get_articles_pending_title_gate).
-     Anything already Successful/Failed/Expired/Archived was either already
+     Anything already Successful/Failed/Archived was either already
      gated, or predates this stage entirely (handled by a one-off backfill)
      — this job only owns the live, ongoing scrape backlog.
   2. Gate   -> for each candidate, embed the title and classify it
@@ -158,6 +158,7 @@ def run_title_gate() -> TitleGateSummary:
         f"(of {total} candidates)."
     )
 
+    duration_seconds = (datetime.now(timezone.utc) - now).total_seconds()
     repository.set_title_gate_run_outcome(now, run_status)
     repository.log_title_gate_run(
         status=run_status,
@@ -165,6 +166,7 @@ def run_title_gate() -> TitleGateSummary:
         gated_articles=gated_count,
         archived_articles=archived_count,
         errors=errors,
+        duration_seconds=duration_seconds,
     )
 
     return TitleGateSummary(

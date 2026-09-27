@@ -38,16 +38,16 @@ export function CalendarGrid({
       <div className="mb-4 flex items-center justify-between">
         <button
           onClick={() => onShiftMonth(-1)}
-          className="flex size-8 items-center justify-center rounded-lg text-ink-secondary hover:bg-surface-raised"
+          className="flex size-8 items-center justify-center rounded-[3px] text-ink-secondary hover:bg-surface-raised"
         >
           <ChevronLeft className="size-4" />
         </button>
-        <h3 className="text-sm font-semibold text-ink">
+        <h3 className="font-display text-sm font-bold uppercase tracking-wide text-ink">
           {new Date(year, month - 1, 1).toLocaleString("en", { month: "long", year: "numeric" })}
         </h3>
         <button
           onClick={() => onShiftMonth(1)}
-          className="flex size-8 items-center justify-center rounded-lg text-ink-secondary hover:bg-surface-raised"
+          className="flex size-8 items-center justify-center rounded-[3px] text-ink-secondary hover:bg-surface-raised"
         >
           <ChevronRight className="size-4" />
         </button>
@@ -55,7 +55,7 @@ export function CalendarGrid({
 
       <div className="grid grid-cols-7 gap-1.5">
         {WEEKDAY_HEADERS.map((d) => (
-          <div key={d} className="pb-1 text-center text-xs font-medium text-ink-muted">
+          <div key={d} className="pb-1 text-center text-[10px] font-semibold uppercase tracking-wide text-ink-muted">
             {d}
           </div>
         ))}
@@ -68,15 +68,13 @@ export function CalendarGrid({
           const isSelected = selectedDate === dateStr;
 
           let marker: string | null = null;
-          if (summary?.has_report) {
-            marker =
-              summary.run_status !== "success"
-                ? "⚠️"
-                : summary.relevant_count > 0
-                  ? `🔴 ${summary.relevant_count}`
-                  : "✅";
-          } else if (summary && summary.candidate_count > 0) {
-            marker = `· ${summary.candidate_count}`;
+          if (summary && summary.total_clusters > 0) {
+            const pending = summary.total_clusters - summary.insights_generated_clusters;
+            if (pending > 0) {
+              marker = `· ${pending}`;
+            } else {
+              marker = summary.relevant_count > 0 ? `🔴 ${summary.relevant_count}` : "✅";
+            }
           }
 
           return (
@@ -84,13 +82,13 @@ export function CalendarGrid({
               key={dateStr}
               onClick={() => onSelectDate(dateStr)}
               className={cn(
-                "flex flex-col items-center gap-0.5 rounded-lg py-2 text-sm transition-colors",
+                "flex flex-col items-center gap-0.5 rounded-[3px] py-2 text-sm transition-colors",
                 isSelected
                   ? "bg-brand text-brand-ink"
                   : "text-ink hover:bg-surface-raised",
               )}
             >
-              <span className="font-medium">{day}</span>
+              <span className="tabular font-mono font-medium">{day}</span>
               <span className={cn("text-[10px] leading-none", isSelected ? "text-brand-ink/80" : "text-ink-muted")}>
                 {marker ?? " "}
               </span>

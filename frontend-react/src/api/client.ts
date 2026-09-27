@@ -9,19 +9,21 @@ import type {
   BucketSummaryResponse,
   CalendarResponse,
   ChartResponse,
+  Cluster,
   DailyReportResponse,
+  DayOverview,
   DisarchiveResponse,
   FlushArchivedResponse,
-  GenerateStatusResponse,
   OverviewResponse,
   PipelineStatsResponse,
-  RelativityFeedbackResponse,
+  PreprocessingQualityResponse,
+  PreprocessingStatusResponse,
+  RunLogEntry,
   ScrapeStatusResponse,
   ScrapeSummaryResponse,
   SingleExtractionResponse,
-  StageStatusResponse,
   StageTriggerResponse,
-  TreeNodesResponse,
+  TitleGateStatusResponse,
 } from "./types";
 
 const BASE_URL = import.meta.env.VITE_BACKEND_API_URL ?? "http://localhost:8000";
@@ -53,18 +55,25 @@ export const getHealth = () => get<{ status: string; mongo_connected: boolean }>
 export const triggerUpdate = () => post<ScrapeSummaryResponse>("/update");
 export const getScrapeStatus = () => get<ScrapeStatusResponse>("/scrape-status");
 
-// ── Extraction ────────────────────────────────────────────────────────
+// ── Preprocessing (clustering, extraction, summarization, entities) ────
+// Extraction was folded into this combined stage on 2026-08-27 — it no
+// longer runs as its own independent bulk stage, only as part of this
+// job, scoped to clustered articles. The single-article retry below is
+// unaffected — it's a per-article recovery action, not the bulk stage.
 
-export const triggerExtraction = () => post<StageTriggerResponse>("/articles/extract");
-export const getExtractionStatus = () => get<StageStatusResponse>("/articles/extract/status");
-export const stopExtraction = () => post<StageTriggerResponse>("/articles/extract/stop");
+export const triggerPreprocessing = () => post<StageTriggerResponse>("/articles/preprocessing");
+export const getPreprocessingStatus = () => get<PreprocessingStatusResponse>("/articles/preprocessing/status");
+export const stopPreprocessing = () => post<StageTriggerResponse>("/articles/preprocessing/stop");
 export const retryArticleExtraction = (articleId: string) =>
   post<SingleExtractionResponse>(`/articles/${articleId}/extract`);
+export const getClusters = (date?: string) =>
+  get<Cluster[]>(`/clusters${date ? `?date=${date}` : ""}`);
+export const getDaysOverview = () => get<DayOverview[]>("/days-overview");
 
 // ── Title gate ────────────────────────────────────────────────────────
 
 export const triggerTitleGate = () => post<StageTriggerResponse>("/articles/title-gate");
-export const getTitleGateStatus = () => get<StageStatusResponse>("/articles/title-gate/status");
+export const getTitleGateStatus = () => get<TitleGateStatusResponse>("/articles/title-gate/status");
 export const stopTitleGate = () => post<StageTriggerResponse>("/articles/title-gate/stop");
 
 // ── Archived articles (title-gate rejects) ───────────────────────────
@@ -74,32 +83,11 @@ export const disarchiveArticle = (articleId: string) =>
   post<DisarchiveResponse>(`/archived/${articleId}/disarchive`);
 export const flushArchivedArticles = () => post<FlushArchivedResponse>("/archived/flush");
 
-// ── Embedding ─────────────────────────────────────────────────────────
-
-export const triggerEmbedding = () => post<StageTriggerResponse>("/articles/embed");
-export const getEmbeddingStatus = () => get<StageStatusResponse>("/articles/embed/status");
-export const stopEmbedding = () => post<StageTriggerResponse>("/articles/embed/stop");
-
-// ── Relativity scoring ────────────────────────────────────────────────
-
-export const triggerScoring = () => post<StageTriggerResponse>("/articles/score");
-export const getScoringStatus = () => get<StageStatusResponse>("/articles/score/status");
-export const stopScoring = () => post<StageTriggerResponse>("/articles/score/stop");
-export const getTreeNodes = () => get<TreeNodesResponse>("/tree/nodes");
-export const submitRelativityFeedback = (articleId: string, direction: "more" | "less") =>
-  post<RelativityFeedbackResponse>(`/articles/${articleId}/relativity-feedback`, { direction });
-export const rescoreArticle = (articleId: string) =>
-  post<RelativityFeedbackResponse>(`/articles/${articleId}/rescore`);
-
-// ── Daily LLM Insight reports ────────────────────────────────────────
+// ── Daily LLM Insight reports (read-only — see types.ts) ────────────────
 
 export const getReportCalendar = (year: number, month: number) =>
   get<CalendarResponse>(`/reports/calendar?year=${year}&month=${month}`);
 export const getDailyReport = (reportDate: string) => get<DailyReportResponse>(`/reports/${reportDate}`);
-export const generateDailyReport = (reportDate: string) =>
-  post<StageTriggerResponse>(`/reports/${reportDate}/generate`);
-export const getReportGenerateStatus = () => get<GenerateStatusResponse>("/reports/generate/status");
-export const stopReportGeneration = () => post<StageTriggerResponse>("/reports/generate/stop");
 
 // ── Articles ──────────────────────────────────────────────────────────
 
@@ -128,6 +116,7 @@ export const submitManualContent = (articleId: string, content: string) =>
 
 export const getOverview = () => get<OverviewResponse>("/stats/overview");
 export const getPipelineStats = () => get<PipelineStatsResponse>("/stats/pipeline");
+export const getPreprocessingQuality = () => get<PreprocessingQualityResponse>("/stats/preprocessing-quality");
 export const getDayChart = (isoDate: string) => get<ChartResponse>(`/stats/chart/day?date=${isoDate}`);
 export const getWeekChart = (isoYear: number, isoWeek: number) =>
   get<ChartResponse>(`/stats/chart/week?iso_year=${isoYear}&iso_week=${isoWeek}`);
@@ -135,3 +124,7 @@ export const getMonthChart = (year: number, month: number) =>
   get<ChartResponse>(`/stats/chart/month?year=${year}&month=${month}`);
 export const getBucketSummary = (dateFrom: string, dateTo: string) =>
   get<BucketSummaryResponse>(`/stats/bucket-summary?date_from=${dateFrom}&date_to=${dateTo}`);
+
+// ── Logs (run-history across every stage) ───────────────────────────────
+
+export const getLogs = (limit = 100) => get<RunLogEntry[]>(`/logs?limit=${limit}`);

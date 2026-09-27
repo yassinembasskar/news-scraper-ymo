@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app import database, repository
-from app.routers import articles, embedding, extraction, reports, scoring, stats, title_gate, update
+from app.routers import articles, extraction, logs, preprocessing, reports, stats, title_gate, update
 
 
 @asynccontextmanager
@@ -28,33 +28,27 @@ async def lifespan(app: FastAPI):
     database.init_indexes()
 
     # Neither the extraction lock (in-process, so already gone) nor the
-    # embedding/scoring in_progress flags (Mongo-backed, survive a restart)
-    # can be trusted to reflect reality if this process was killed outright
+    # other stages' in_progress flags (Mongo-backed, survive a restart) can
+    # be trusted to reflect reality if this process was killed outright
     # rather than shut down cleanly — their finally blocks wouldn't have
     # run. Reset every job guard and any article stuck at "Pending" from
-    # any job so nothing is left permanently stuck or permanently
-    # unrunnable — and, for extraction/embedding/scoring alike, an article
-    # a run never reached or didn't finish falls back to its pre-run
-    # status rather than ending up mislabeled "Failed".
+    # extraction so nothing is left permanently stuck or permanently
+    # unrunnable — an article a run never reached or didn't finish falls
+    # back to its pre-run status rather than ending up mislabeled "Failed".
     # Title gating has no per-article "Pending" state to reset (a gate call
-    # is a single synchronous request, not a multi-step process, same as
-    # report generation) — only the Mongo-backed job guard needs clearing.
+    # is a single synchronous request, not a multi-step process) — only the
+    # Mongo-backed job guard needs clearing.
     repository.set_title_gate_in_progress(False)
     repository.set_title_gate_stop_requested(False)
+    # Preprocessing (clustering/condensing/entities/contextualization/
+    # insights) has no per-article "Pending" state to reset either — every
+    # phase's unit of work is a single in-memory or single-LLM-call step,
+    # not a multi-step process — same reasoning as title gating.
+    repository.set_clustering_in_progress(False)
+    repository.set_clustering_stop_requested(False)
     repository.reset_pending_extraction_articles()
     repository.set_extraction_in_progress(False)
     repository.set_extraction_stop_requested(False)
-    repository.reset_pending_embedding_articles()
-    repository.set_embedding_in_progress(False)
-    repository.set_embedding_stop_requested(False)
-    repository.reset_pending_scoring_articles()
-    repository.set_scoring_in_progress(False)
-    repository.set_scoring_stop_requested(False)
-    # Report generation has no per-article "Pending" state to reset (it
-    # writes one daily_reports document at the end, not per-article fields),
-    # so only the Mongo-backed job guard needs clearing after a hard crash.
-    repository.set_report_in_progress(False)
-    repository.set_report_stop_requested(False)
 
     yield
     # No explicit shutdown cleanup needed — MongoClient closes its
@@ -87,10 +81,10 @@ app.include_router(update.router)
 app.include_router(articles.router)
 app.include_router(stats.router)
 app.include_router(title_gate.router)
+app.include_router(preprocessing.router)
 app.include_router(extraction.router)
-app.include_router(embedding.router)
-app.include_router(scoring.router)
 app.include_router(reports.router)
+app.include_router(logs.router)
 
 
 @app.get("/health")

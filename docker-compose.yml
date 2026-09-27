@@ -154,9 +154,9 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
-  # Runs the full Update -> Extract -> Embed -> Score -> Report pipeline
-  # once a day at PIPELINE_HOUR_UTC:00 UTC, driving it through the same
-  # HTTP endpoints the dashboard's buttons use (see scheduler/run_pipeline.py).
+  # Runs the full Update -> Preprocessing -> Report pipeline once a day at
+  # PIPELINE_HOUR_UTC:00 UTC, driving it through the same HTTP endpoints
+  # the dashboard's buttons use (see scheduler/run_pipeline.py).
   # Deliberately a plain Python sleep-until-next-run loop rather than cron
   # or an external orchestrator (Airflow/Prefect/etc.) — this is one linear
   # job run once a day, so the extra infrastructure isn't earning its

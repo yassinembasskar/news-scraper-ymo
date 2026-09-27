@@ -95,36 +95,24 @@ def get_bucket_summary(date_from: datetime, date_to: datetime) -> dict:
 # ── Pipeline stage stats (overview bar, under each button) ─────────────
 
 def get_pipeline_stats() -> dict:
-    """Per-stage status breakdowns shown under the "Gate titles", "Extract
-    articles", "Embed articles", and "Relativity scoring" buttons. Each
-    stage's denominator is its own actual candidate pool, not the whole
-    collection — extraction is counted over every article, title gating
-    over articles still in "No Extraction" (same pool
-    get_articles_pending_title_gate() draws from — anything
-    Successful/Failed/Expired/Archived is already resolved one way or
-    another and will never be touched by this stage again, regardless of
-    whether it was ever literally run through the LLM check, so counting
-    it here would just be noise), embedding over articles that were
-    actually successfully extracted (the only ones ever eligible, per
-    get_articles_pending_embedding()'s ingestion_status == "Successful"
-    filter), and scoring over articles that were actually embedded (same
-    reasoning, embedding_status == "Embedded")."""
+    """Per-stage status breakdowns shown under the "Gate titles" and
+    "Extract articles" buttons. Each stage's denominator is its own actual
+    candidate pool, not the whole collection — extraction is counted over
+    every article, title gating over articles still in "No Extraction"
+    (same pool get_articles_pending_title_gate() draws from — anything
+    Successful/Failed/Archived is already resolved one way or another and
+    will never be touched by this stage again, regardless of whether it
+    was ever literally run through the LLM check, so counting it here
+    would just be noise). The old per-article embedding/scoring stages
+    were retired 2026-09-15 (see docs/completion-plan.md) in favor of
+    cluster-level condensation/contextualization, tracked on the
+    Preprocessing card instead — no equivalent blocks here anymore."""
     title_gate_counts = repository.get_status_field_counts(
         "title_gate_status", {"ingestion_status": "No Extraction"}
     )
     title_gate_total = sum(title_gate_counts.values())
     extraction_counts = repository.get_status_field_counts("ingestion_status")
     total_articles = sum(extraction_counts.values())
-
-    embedding_counts = repository.get_status_field_counts(
-        "embedding_status", {"ingestion_status": "Successful"}
-    )
-    successful_extractions = extraction_counts.get("Successful", 0)
-
-    scoring_counts = repository.get_status_field_counts(
-        "scored_status", {"embedding_status": "Embedded"}
-    )
-    embedded_total = embedding_counts.get("Embedded", 0)
 
     return {
         "title_gate": {
@@ -142,26 +130,18 @@ def get_pipeline_stats() -> dict:
             # failure (paywall, timeout, layout). See routers/articles.py's
             # Archived-review endpoints.
             "archived": extraction_counts.get("Archived", 0),
-            "expired": extraction_counts.get("Expired", 0),
             "not_extracted": extraction_counts.get("No Extraction", 0),
             "pending": extraction_counts.get("Pending", 0),
         },
-        "embedding": {
-            "total": successful_extractions,
-            "embedded": embedding_counts.get("Embedded", 0),
-            "not_embedded": embedding_counts.get("Not Embedded", 0),
-            "failed": embedding_counts.get("Failed", 0),
-            "expired": embedding_counts.get("Expired", 0),
-            "pending": embedding_counts.get("Pending", 0),
-        },
-        "scoring": {
-            "total": embedded_total,
-            "scored": scoring_counts.get("Scored", 0),
-            "not_scored": scoring_counts.get("Not Scored", 0),
-            "failed": scoring_counts.get("Failed", 0),
-            "pending": scoring_counts.get("Pending", 0),
-        },
     }
+
+
+def get_preprocessing_quality() -> dict:
+    """Per-phase quality signals for condensing/entities/contextualization/
+    insights — see repository.get_preprocessing_quality_metrics() for the
+    aggregation and why it's meant to be watched live during a backlog
+    run, not just checked once at the end."""
+    return repository.get_preprocessing_quality_metrics()
 
 
 # ── Overview (top summary bar) ──────────────────────────────────────────
